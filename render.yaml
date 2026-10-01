@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: ema-backend
+    runtime: python
+    plan: standard
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: EMA_ENV
+        value: production
+      - key: EMA_ENABLE_KEEPALIVE
+        value: "false"
+      - key: SESSION_SECURE_COOKIE
+        value: "true"
+      - key: EMA_ADMIN_SECURE_COOKIE
+        value: "true"
+      - key: TOKEN_ENCRYPTION_REQUIRED
+        value: "true"
+      - key: DB_PATH
+        value: /var/data/assistant.db
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: FRONTEND_URL
+        sync: false
+      - key: BACKEND_URL
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        sync: false
+      - key: REDIRECT_URI
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GROQ_API_KEYS
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: EMA_ADMIN_USERNAME
+        sync: false
+      - key: EMA_ADMIN_PASSWORD_HASH
+        sync: false

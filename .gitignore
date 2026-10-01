@@ -15,8 +15,6 @@ __pycache__/
 *.db
 *.db-journal
 *.log
-ema_errors.jsonl
-.state_shadow_*.json
 backend/*.log
 .browser_session/
 app_profile/
@@ -30,3 +28,6 @@ Output/
 Thumbs.db
 .vscode/
 .idea/
+!.env.example
+!.env.*.example
+assistant_v2.db*

@@ -86,30 +86,19 @@
         ? "http://127.0.0.1:8000"
         : window.location.origin);
 
-    // Auth/session bootstrap. The page is server-gated as well; this client gate
-    // only prevents flicker/races and starts the entry video after real auth.
+    // Auth/session bootstrap. Production web sessions are HttpOnly cookies.
+    // Localhost keeps the same cookie flow; no session token is stored in localStorage.
     (function () {
-      const urlParams = new URLSearchParams(window.location.search);
-      const paramSid = urlParams.get("session_id");
-      if (paramSid) {
-        localStorage.setItem("assistant_session_id", paramSid);
-        // Remove the session token from browser history immediately.
-        history.replaceState(null, "", window.location.pathname + window.location.hash);
-      }
-
       const originalFetch = window.fetch.bind(window);
       let authRedirecting = false;
 
       window.fetch = async function (input, init = {}) {
         const headers = new Headers(init.headers || {});
-        const sid = localStorage.getItem("assistant_session_id") || "";
-        if (sid) headers.set("X-Session-ID", sid);
         const nextInit = { ...init, headers, credentials: "include" };
         const response = await originalFetch(input, nextInit);
         if (response.status === 401 && window.__emaAuthVerified && !authRedirecting) {
           authRedirecting = true;
           window.__emaAuthVerified = false;
-          localStorage.removeItem("assistant_session_id");
           window.location.replace("/login.html");
         }
         return response;
@@ -117,10 +106,7 @@
 
       window.__emaAuthPromise = (async function guardDashboard() {
         try {
-          const res = await originalFetch(`${BACKEND_URL}/api/user`, {
-            credentials: "include",
-            headers: paramSid ? { "X-Session-ID": paramSid } : undefined
-          });
+          const res = await originalFetch(`${BACKEND_URL}/api/user`, { credentials: "include" });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || !data.authenticated) throw new Error("Not authenticated");
 
@@ -131,7 +117,6 @@
           window.dispatchEvent(new Event("ema:auth-verified"));
           return true;
         } catch (err) {
-          localStorage.removeItem("assistant_session_id");
           window.location.replace("/login.html");
           return false;
         }
@@ -2074,7 +2059,6 @@
             `).join('');
           }
         } else {
-          localStorage.removeItem("assistant_session_id");
           window.location.replace("/login.html");
         }
       } catch (e) {
@@ -2139,10 +2123,7 @@
 
     function triggerAddAccount() {
       showLoader('Connecting to Google Sign-In...');
-      const sessionId = localStorage.getItem("assistant_session_id") || crypto.randomUUID();
-      localStorage.setItem("assistant_session_id", sessionId);
-
-      window.location.href = `${BACKEND_URL}/auth/login?session_id=${sessionId}&browser=1`;
+      window.location.href = `${BACKEND_URL}/auth/login?browser=1`;
     }
 
     function openSignOutModal() {
@@ -2204,7 +2185,6 @@
       } catch (err) {
         console.warn("Logout request failed:", err);
       } finally {
-        localStorage.removeItem("assistant_session_id");
         window.location.replace("/login.html");
       }
     }

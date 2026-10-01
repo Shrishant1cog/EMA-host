@@ -75,7 +75,6 @@
     }
     requestIcons();
   }
-  $("#skip-entry")?.addEventListener('click',closeEntry);
   $("#entry-video")?.addEventListener('timeupdate',e=>{const v=e.currentTarget,p=$(".entry-progress span");if(p&&v.duration)p.style.width=`${Math.min(100,v.currentTime/v.duration*100)}%`});
   $("#entry-video")?.addEventListener('ended',closeEntry,{once:true});
   $("#entry-video")?.addEventListener('error',()=>setTimeout(closeEntry,800),{once:true});

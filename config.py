@@ -128,8 +128,8 @@ TOKEN_ENCRYPTION_REQUIRED: bool = _env_bool("TOKEN_ENCRYPTION_REQUIRED", BACKEND
 SESSION_TTL_SECONDS: int = _env_int("SESSION_TTL_SECONDS", 7 * 24 * 3600, 900, 30 * 24 * 3600)
 SESSION_SECURE_COOKIE: bool = _env_bool("SESSION_SECURE_COOKIE", BACKEND_URL.lower().startswith("https://"))
 
-LOG_FILE: Path = BASE_DIR / "calendar_assistant.log"
-DB_PATH: Path = BASE_DIR / "assistant_v2.db"
+LOG_FILE: Path = Path(_clean_env_val("LOG_FILE", str(BASE_DIR / "calendar_assistant.log"))).expanduser()
+DB_PATH: Path = Path(_clean_env_val("DB_PATH", str(BASE_DIR / "assistant_v2.db"))).expanduser()
 
 
 class AppConfig:

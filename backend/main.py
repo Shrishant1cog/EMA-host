@@ -359,9 +359,11 @@ async def lifespan(app_instance: FastAPI):
     emit_user_log("INFO", f"EMA service active. Current RAM: {AdaptiveMemoryGovernor.get_memory_usage_mb()} MB")
     
     KEEP_ALIVE_STOP_EVENT.clear()
-    # Only run the keep-alive thread when an external URL is configured.
+    # Optional self-health ping. Disabled by default in production because
+    # Render manages service health independently.
     external_url = (os.getenv("RENDER_EXTERNAL_URL") or os.getenv("BACKEND_URL") or "").strip()
-    if external_url:
+    keepalive_enabled = os.getenv("EMA_ENABLE_KEEPALIVE", "false").strip().lower() in {"1", "true", "yes", "on"}
+    if external_url and keepalive_enabled:
         KEEP_ALIVE_THREAD = threading.Thread(target=keep_alive_worker, daemon=True, name="EMA-KeepAlive")
         KEEP_ALIVE_THREAD.start()
     else:
@@ -1748,6 +1750,10 @@ def logo():
 
 @app.get("/")
 def root(request: Request):
+    # Production Render service is API/auth only. Netlify owns the website.
+    if os.getenv("EMA_ENV", "development").strip().lower() in {"production", "prod"}:
+        return JSONResponse({"service": "EMA API", "status": "online", "frontend": getattr(config, "FRONTEND_URL", "")})
+
     sid = get_request_session_id(request)
     if sid and get_accounts_for_session(sid):
         return RedirectResponse(url="/index.html", status_code=303)
@@ -2074,7 +2080,11 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
         </body>
         </html>
         """
-        response = HTMLResponse(content=html_content)
+        frontend_url = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
+        if os.getenv("EMA_ENV", "development").strip().lower() in {"production", "prod"} and frontend_url:
+            response = RedirectResponse(url=f"{frontend_url}/index.html", status_code=303)
+        else:
+            response = HTMLResponse(content=html_content)
         response.set_cookie(key="assistant_session_id", value=authenticated_session_id, httponly=True, secure=_session_cookie_secure(), samesite="lax", path="/", max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600))
         return response
 

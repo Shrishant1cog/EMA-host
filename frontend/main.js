@@ -6,12 +6,12 @@ const ENV = {
   RENDER_BACKEND_URL: window.__EMA_BACKEND_URL__ ||
     (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
       ? "http://127.0.0.1:8000"
-      : "https://your-service-name.onrender.com"),
+      : window.location.origin),
   NETLIFY_FRONTEND_URL: window.location.origin
 };
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Preserve the original direct OAuth redirect used by the backend.
+  // Production uses the Netlify same-origin proxy.
   const signInBtn = document.getElementById("btn-sign-in");
   const mobileSignInBtn = document.getElementById("mobile-sign-in");
   const targetLoginUrl = `${ENV.RENDER_BACKEND_URL}/auth/login?browser=1`;

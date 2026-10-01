@@ -16,23 +16,13 @@
     // Universal Fetch Interceptor: Works on Netlify static hosting without backend script injection
     (function() {
       const urlParams = new URLSearchParams(window.location.search);
-      const paramSid = urlParams.get("session_id");
-      if (paramSid) {
-        localStorage.setItem("assistant_session_id", paramSid);
-      }
+      // Production web sessions are cookie-based. Query-string session IDs are legacy-only.
 
       const _origFetch = window.fetch;
       window.fetch = function(input, init) {
         init = init || {};
         init.headers = init.headers || {};
-        const sid = localStorage.getItem("assistant_session_id") || "";
-        if (sid) {
-          if (init.headers instanceof Headers) {
-            init.headers.set("X-Session-ID", sid);
-          } else {
-            init.headers["X-Session-ID"] = sid;
-          }
-        }
+        // HttpOnly session cookie is the source of truth.
         init.credentials = "include";
         return _origFetch(input, init);
       };
@@ -293,10 +283,7 @@
       }
       if (label) label.innerText = "Connecting to Google...";
 
-      const sessionId = localStorage.getItem("assistant_session_id") || crypto.randomUUID();
-      localStorage.setItem("assistant_session_id", sessionId);
-
-      window.location.assign(`${BACKEND_URL}/auth/login?session_id=${encodeURIComponent(sessionId)}&browser=1`);
+      window.location.assign(`${BACKEND_URL}/auth/login?browser=1`);
     }
   </script>
 </body>

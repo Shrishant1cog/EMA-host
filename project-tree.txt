@@ -1,0 +1,68 @@
+EMA PROJECT STRUCTURE
+=====================
+
+ai-calendar-assistant/
+├── backend/
+│   ├── models/
+│   │   ├── __init__.py
+│   │   └── event_schemas.py
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── ai_service.py
+│   │   ├── calendar_service.py
+│   │   ├── drive_service.py
+│   │   ├── drive_state_adapter.py
+│   │   ├── gmail_service.py
+│   │   └── google_auth.py
+│   ├── utils/
+│   │   ├── __init__.py
+│   │   ├── dns_resolver.py
+│   │   ├── logger.py
+│   │   └── state_tracker.py
+│   ├── __init__.py
+│   └── main.py
+├── bin/
+├── extractors/
+│   ├── __init__.py
+│   ├── ocr_extractor.py
+│   └── text_extractor.py
+├── frontend/
+│   ├── assets/
+│   │   └── logo.png
+│   ├── fonts/
+│   │   └── GeistPixel-Circle.woff2
+│   ├── favicon.ico
+│   ├── index.html
+│   ├── login.html
+│   ├── main.js
+│   ├── preview.html
+│   ├── privacy.html
+│   ├── styles.css
+│   └── terms.html
+├── Output/
+│   └── EMA_Setup.exe
+├── .gitattributes
+├── .gitignore
+├── .state_shadow_mdnikshith_gmail_com.json
+├── .state_shadow_popud7235_gmail_com.json
+├── .state_shadow_shrishanthsandigawad1_gmail_com.json
+├── ai-calendar-assistant.code-workspace
+├── assistant_v2.db
+├── buildozer.spec
+├── config.py
+├── desktop_app.py
+├── install_dependencies.bat
+├── installer.iss
+├── main.py
+├── mastertest.py
+├── mobile_main.py
+├── package-lock.json
+├── print_structure.py
+├── project_structure.txt
+├── requirements.txt
+├── run_app.vbs
+├── setup_app.bat
+├── strucrtyre.py
+├── test_e2e_all.py
+├── test_everything.py
+└── test_terminal_live.py

@@ -1,0 +1,2682 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <title>EMA • Autonomous Inbox Intelligence</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#040711" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="application-name" content="EMA Autonomous Inbox Intelligence" />
+  <meta name="version" content="2026.09.30" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+
+  <!-- Fonts: Plus Jakarta Sans & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <script defer src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    // EMA adaptive runtime: uses browser-exposed viewport/device hints only.
+    // No precise location, contacts, camera, microphone, or other permissions are requested.
+    (() => {
+      const root = document.documentElement;
+      const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      const saveData = !!navigator.connection?.saveData;
+      const effectiveType = navigator.connection?.effectiveType || "unknown";
+      const memory = typeof navigator.deviceMemory === "number" ? navigator.deviceMemory : null;
+      const ua = navigator.userAgent || "";
+
+      const classify = () => {
+        const w = Math.max(window.innerWidth || 0, root.clientWidth || 0);
+        const h = Math.max(window.innerHeight || 0, root.clientHeight || 0);
+        const minSide = Math.min(w, h);
+        const touch = navigator.maxTouchPoints > 0 || /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+        const cores = typeof navigator.hardwareConcurrency === "number" ? navigator.hardwareConcurrency : 4;
+        const device = w < 768 ? "mobile" : (w < 1100 ? "tablet" : "desktop");
+        const orientation = w >= h ? "landscape" : "portrait";
+        const lowMemory = memory !== null && memory <= 4;
+        const lowCpu = cores <= 4;
+        const lowConnection = saveData || /(^|-)2g$|3g/.test(effectiveType);
+        const performanceTier = (lowMemory || lowCpu || lowConnection) ? "eco" : "full";
+        const memoryTier = performanceTier === "eco" ? "low" : "normal";
+        const compact = minSide < 430 || w < 600;
+        root.dataset.device = device;
+        root.dataset.orientation = orientation;
+        root.dataset.pointer = touch ? "coarse" : "fine";
+        root.dataset.memoryTier = memoryTier;
+        root.dataset.performance = performanceTier;
+        root.dataset.cores = String(cores);
+        root.dataset.connection = effectiveType.replace(/[^a-z0-9_-]/gi, "");
+        root.dataset.reducedMotion = reducedMotion ? "true" : "false";
+        root.dataset.compact = compact ? "true" : "false";
+        root.style.setProperty("--ema-vw", `${w}px`);
+        root.style.setProperty("--ema-vh", `${h}px`);
+        root.style.setProperty("--ema-dpr", String(Math.min(window.devicePixelRatio || 1, 2)));
+      };
+
+      classify();
+      let resizeTimer = 0;
+      const scheduleClassify = () => {
+        window.clearTimeout(resizeTimer);
+        resizeTimer = window.setTimeout(classify, 100);
+      };
+      window.addEventListener("resize", scheduleClassify, { passive: true });
+      window.addEventListener("orientationchange", scheduleClassify, { passive: true });
+      navigator.connection?.addEventListener?.("change", classify);
+
+      // Device model is exposed by User-Agent Client Hints only on supporting browsers.
+      // It is used locally for diagnostics/adaptation and is never sent to the backend.
+      if (navigator.userAgentData?.getHighEntropyValues) {
+        navigator.userAgentData.getHighEntropyValues(["model", "platform", "platformVersion"])
+          .then(info => {
+            root.dataset.platform = info.platform || "unknown";
+            root.dataset.model = info.model || "unknown";
+          })
+          .catch(() => {});
+      }
+    })();
+
+    const BACKEND_URL = window.__EMA_BACKEND_URL__ ||
+      ((window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+        ? "http://127.0.0.1:8000"
+        : window.location.origin);
+
+    // Auth/session bootstrap. The page is server-gated as well; this client gate
+    // only prevents flicker/races and starts the entry video after real auth.
+    (function () {
+      const urlParams = new URLSearchParams(window.location.search);
+      const paramSid = urlParams.get("session_id");
+      if (paramSid) {
+        localStorage.setItem("assistant_session_id", paramSid);
+        // Remove the session token from browser history immediately.
+        history.replaceState(null, "", window.location.pathname + window.location.hash);
+      }
+
+      const originalFetch = window.fetch.bind(window);
+      let authRedirecting = false;
+
+      window.fetch = async function (input, init = {}) {
+        const headers = new Headers(init.headers || {});
+        const sid = localStorage.getItem("assistant_session_id") || "";
+        if (sid) headers.set("X-Session-ID", sid);
+        const nextInit = { ...init, headers, credentials: "include" };
+        const response = await originalFetch(input, nextInit);
+        if (response.status === 401 && window.__emaAuthVerified && !authRedirecting) {
+          authRedirecting = true;
+          window.__emaAuthVerified = false;
+          localStorage.removeItem("assistant_session_id");
+          window.location.replace("/login.html");
+        }
+        return response;
+      };
+
+      window.__emaAuthPromise = (async function guardDashboard() {
+        try {
+          const res = await originalFetch(`${BACKEND_URL}/api/user`, {
+            credentials: "include",
+            headers: paramSid ? { "X-Session-ID": paramSid } : undefined
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.authenticated) throw new Error("Not authenticated");
+
+          document.documentElement.classList.add("auth-verified");
+          document.body.classList.remove("auth-pending");
+          document.body.classList.add("auth-ready");
+          window.__emaAuthVerified = true;
+          window.dispatchEvent(new Event("ema:auth-verified"));
+          return true;
+        } catch (err) {
+          localStorage.removeItem("assistant_session_id");
+          window.location.replace("/login.html");
+          return false;
+        }
+      })();
+    })();
+
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            emaDark: 'var(--ema-bg)',
+            emaMain: 'var(--ema-main)',
+            emaCard: 'var(--ema-card)',
+            emaBorder: 'var(--ema-border)',
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* CSS Variables for Themes (Cyber Dark, Read Mode) */
+    :root {
+      --ema-bg: #040711;
+      --ema-main: #080d1a;
+      --ema-card: rgba(15, 23, 42, 0.78);
+      --ema-border: rgba(255, 255, 255, 0.08);
+      --ema-text: #f1f5f9;
+      --ema-subtext: #94a3b8;
+      --ema-ambient: radial-gradient(circle at 50% 20%, rgba(99, 102, 241, 0.12) 0%, rgba(4, 7, 17, 0.98) 100%);
+    }
+
+    [data-theme="dark"] {
+      --ema-bg: #040711;
+      --ema-main: #080d1a;
+      --ema-card: rgba(15, 23, 42, 0.78);
+      --ema-border: rgba(255, 255, 255, 0.08);
+      --ema-text: #f1f5f9;
+      --ema-subtext: #94a3b8;
+      --ema-ambient: radial-gradient(circle at 50% 20%, rgba(99, 102, 241, 0.12) 0%, rgba(4, 7, 17, 0.98) 100%);
+    }
+
+    [data-theme="read"] {
+      --ema-bg: #14161d;
+      --ema-main: #181b24;
+      --ema-card: rgba(28, 32, 44, 0.9);
+      --ema-border: rgba(245, 158, 11, 0.15);
+      --ema-text: #fef3c7;
+      --ema-subtext: #d97706;
+      --ema-ambient: radial-gradient(circle at 50% 20%, rgba(180, 83, 9, 0.1) 0%, rgba(20, 22, 29, 0.98) 100%);
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    html:not(.auth-verified) body {
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+
+    body {
+      touch-action: pan-y;
+      background-color: var(--ema-bg);
+      color: var(--ema-text);
+      height: 100vh;
+      height: 100dvh;
+      min-height: 100svh;
+      width: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+      overflow-wrap: anywhere;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+
+    .ambient-mesh {
+      position: fixed;
+      inset: 0;
+      background: var(--ema-ambient);
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    .glass-card {
+      background: var(--ema-card);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      contain: layout paint;
+      border: 1px solid var(--ema-border);
+      box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
+      transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    body.auth-pending > #app-main-scroll, body.auth-pending > #mobile-drawer, body.auth-pending > aside { visibility:hidden; }
+
+    .glass-card:hover {
+      border-color: rgba(99, 102, 241, 0.35);
+      transform: translateY(-2px);
+    }
+
+    .btn-action {
+      transition: transform 0.16s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, filter 0.2s ease;
+      will-change: transform;
+    }
+    .btn-action:hover:not(:disabled) {
+      filter: brightness(1.12);
+      transform: translateY(-1px);
+    }
+    .btn-action:active:not(:disabled) {
+      transform: scale(0.96) translateY(1px);
+    }
+    .btn-action:disabled {
+      opacity: 0.38 !important;
+      cursor: not-allowed !important;
+      transform: none !important;
+      box-shadow: none !important;
+      filter: grayscale(0.5);
+    }
+
+    .glow-pulse {
+      box-shadow: 0 0 14px 2px rgba(52, 211, 153, 0.45);
+    }
+
+    .solid-dropdown {
+      background-color: var(--ema-main) !important;
+      border: 1px solid var(--ema-border) !important;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(99, 102, 241, 0.2) !important;
+    }
+
+    .tab-content-pane {
+      animation: tabFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    @keyframes tabFadeIn {
+      from { opacity: 0; transform: translateY(6px) scale(0.995); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .selected-event-card {
+      border-color: #6366f1 !important;
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.4), 0 14px 35px -8px rgba(99, 102, 241, 0.3) !important;
+      transform: translateY(-2px) scale(1.01) !important;
+    }
+
+    .terminal-scroll::-webkit-scrollbar { width: 5px; }
+    .terminal-scroll::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.3); border-radius: 999px; }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 999px; }
+
+
+    /* ===== EMA Entry Video ===== */
+    #ema-entry-video {
+      position: fixed;
+      inset: 0;
+      z-index: 100000;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 1;
+      visibility: visible;
+      transition: opacity .7s cubic-bezier(.22,1,.36,1), visibility .7s linear;
+      animation: emaIntroIn .55s cubic-bezier(.22,1,.36,1) both;
+      contain: strict;
+    }
+
+    @keyframes emaIntroIn {
+      from { opacity: 0; transform: scale(1.012); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    #ema-entry-video.is-hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    #ema-entry-video-media {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      background: #000;
+      object-position: center center;
+      transform: translateZ(0);
+      backface-visibility: hidden;
+    }
+
+    #ema-entry-video::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at center, transparent 35%, rgba(0,0,0,.35) 100%);
+    }
+
+    /* ===== EMA interaction/performance layer ===== */
+    :root { --ema-ease: cubic-bezier(.16,1,.3,1); }
+    .ema-reveal { opacity:0; transform:translate3d(0,8px,0); }
+    .ema-reveal.is-visible { opacity:1; transform:none; transition:opacity .42s var(--ema-ease),transform .42s var(--ema-ease); }
+    .ema-interactive { transition:transform .18s var(--ema-ease),border-color .18s ease,box-shadow .18s ease,background-color .18s ease; }
+    #ema-entry-progress { position:absolute; left:50%; bottom:max(18px,env(safe-area-inset-bottom)); transform:translateX(-50%); width:min(280px,42vw); height:3px; z-index:3; overflow:hidden; border-radius:999px; background:rgba(255,255,255,.12); pointer-events:none; }
+    #ema-entry-progress span { display:block; width:0; height:100%; border-radius:inherit; background:linear-gradient(90deg,#6366f1,#22d3ee); transform-origin:left center; }
+    #ema-entry-status { position:absolute; left:50%; bottom:calc(max(18px,env(safe-area-inset-bottom)) + 13px); transform:translateX(-50%); z-index:3; color:rgba(255,255,255,.62); font:600 9px/1.2 "JetBrains Mono",monospace; letter-spacing:.08em; text-transform:uppercase; pointer-events:none; white-space:nowrap; }
+    .quick-palette-backdrop { position:fixed; inset:0; z-index:99990; display:grid; place-items:start center; padding-top:clamp(70px,12vh,130px); background:rgba(2,4,11,.56); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+    .quick-palette { width:min(560px,calc(100vw - 28px)); background:rgba(8,13,26,.97); border:1px solid rgba(255,255,255,.1); border-radius:20px; box-shadow:0 30px 100px rgba(0,0,0,.6); overflow:hidden; animation:paletteIn .22s var(--ema-ease); }
+    .quick-palette-search { width:100%; border:0; outline:0; background:transparent; color:#f8fafc; padding:17px 18px; font-size:14px; }
+    .quick-palette-list { max-height:min(55vh,420px); overflow:auto; padding:7px; border-top:1px solid rgba(255,255,255,.06); }
+    .quick-palette-item { width:100%; display:flex; align-items:center; gap:11px; padding:11px 12px; border:0; border-radius:12px; background:transparent; color:#cbd5e1; text-align:left; cursor:pointer; }
+    .quick-palette-item:hover,.quick-palette-item[aria-current="true"] { background:rgba(99,102,241,.14); color:#fff; }
+    .quick-palette-key { margin-left:auto; color:#64748b; font:600 9px "JetBrains Mono",monospace; }
+    @keyframes paletteIn { from{opacity:0;transform:translateY(-8px) scale(.985)} to{opacity:1;transform:none} }
+    :root[data-performance="eco"] .ambient-mesh { background:#040711; }
+    :root[data-performance="eco"] .glass-card { backdrop-filter:none; -webkit-backdrop-filter:none; box-shadow:0 8px 20px -14px rgba(0,0,0,.55); }
+    :root[data-performance="eco"] .glow-pulse { box-shadow:none; }
+    :root[data-performance="eco"] .ema-reveal.is-visible { transition-duration:.22s; }
+    :root[data-reduced-motion="true"] .ema-reveal,:root[data-reduced-motion="true"] .ema-reveal.is-visible { opacity:1; transform:none; transition:none; }
+
+    /* ===== Responsive device adaptation ===== */
+    #app-main-scroll {
+      min-width: 0;
+      padding-bottom: env(safe-area-inset-bottom);
+      overscroll-behavior-y: contain;
+      -webkit-overflow-scrolling: touch;
+      scroll-behavior: auto;
+      scrollbar-gutter: stable;
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    img, svg, video, canvas {
+      max-width: 100%;
+    }
+
+    button, a, input, select, textarea {
+      touch-action: manipulation;
+    }
+
+    @media (max-width: 1100px) {
+      .glass-card {
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+      }
+    }
+
+    @media (max-width: 767px) {
+      body {
+        font-size: 14px;
+      }
+      #app-main-scroll {
+        height: calc(100dvh - 57px);
+      }
+      .ambient-mesh {
+        background: radial-gradient(circle at 50% 15%, rgba(99,102,241,.10), rgba(4,7,17,.98) 68%);
+      }
+      .glass-card {
+        backdrop-filter: blur(7px);
+        -webkit-backdrop-filter: blur(7px);
+      }
+    }
+
+    @media (max-width: 480px) {
+      .glass-card {
+        box-shadow: 0 8px 22px -12px rgba(0,0,0,.55), inset 0 1px 0 0 rgba(255,255,255,.03);
+      }
+      .tab-content-pane {
+        animation-duration: .16s;
+      }
+    }
+
+    /* Low-memory / data-saver mode: keep the UI animated, but avoid expensive blur/filter work. */
+    :root[data-memory-tier="low"] .glass-card,
+    :root[data-connection="2g"] .glass-card,
+    :root[data-connection="slow-2g"] .glass-card {
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: 0 8px 20px -14px rgba(0,0,0,.55);
+    }
+
+    :root[data-memory-tier="low"] .ambient-mesh {
+      background: #040711;
+    }
+
+    :root[data-memory-tier="low"] .glow-pulse {
+      box-shadow: none;
+    }
+
+    :root[data-reduced-motion="true"] *,
+    :root[data-reduced-motion="true"] *::before,
+    :root[data-reduced-motion="true"] *::after {
+      animation-duration: .01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .01ms !important;
+      scroll-behavior: auto !important;
+    }
+
+    @media (hover: none) {
+      .glass-card:hover,
+      .btn-action:hover:not(:disabled),
+    }
+
+    @media (orientation: landscape) and (max-height: 600px) {
+      header {
+        padding-top: max(10px, env(safe-area-inset-top));
+        padding-bottom: 10px;
+      }
+      main {
+        padding-top: 14px !important;
+        padding-bottom: 14px !important;
+      }
+    }
+
+    @media (min-width: 1600px) {
+      main {
+        max-width: 1440px;
+      }
+    }
+
+
+    /* ===== Spacious desktop layout / performance pass ===== */
+    #app-main-scroll > header > div:first-child { min-width: 0; flex: 1 1 auto; }
+    #app-main-scroll > header > div:last-child { flex: 0 0 auto; flex-wrap: nowrap; white-space: nowrap; }
+    #app-main-scroll > header > div:last-child > *, #user-menu-btn, #ema-quick-actions, #ema-connection-badge { flex-shrink: 0; white-space: nowrap; }
+    #user-menu-btn { min-width: 190px; }
+    #header-user-name { max-width: 180px !important; }
+    #app-main-scroll > main { max-width: 1600px !important; padding-left: clamp(28px, 3.4vw, 60px); padding-right: clamp(28px, 3.4vw, 60px); padding-top: clamp(28px, 3vw, 40px); padding-bottom: clamp(32px, 3vw, 48px); }
+    #tab-dashboard { row-gap: 28px !important; }
+    #tab-dashboard > .grid.grid-cols-2 { gap: 18px !important; }
+    #tab-dashboard > .grid.grid-cols-1 { gap: 22px !important; }
+    #tab-dashboard .glass-card { min-width: 0; }
+    #tab-dashboard > .grid.grid-cols-2:first-of-type .glass-card p { white-space: nowrap; }
+    #ema-pro-welcome { padding: 28px 30px !important; }
+    #ema-pro-welcome > div { gap: 22px !important; }
+    #ema-pro-welcome button { min-width: 112px; min-height: 42px; white-space: nowrap; justify-content: center; }
+
+    /* Avoid unnecessary GPU layer promotion and reduce glass blur cost. */
+    .btn-action { will-change: auto !important; }
+    .glass-card { backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+    @media (max-width: 1250px) and (min-width: 768px) {
+      #app-main-scroll > header { align-items: flex-start !important; }
+      #app-main-scroll > header > div:last-child { flex-wrap: wrap; justify-content: flex-end; max-width: 52%; }
+      #user-menu-btn { min-width: 170px; }
+      #app-main-scroll > main { padding-left: 28px; padding-right: 28px; }
+    }
+    @media (max-width: 980px) and (min-width: 768px) {
+      #app-main-scroll > header > div:last-child { max-width: 46%; gap: 8px; }
+      #ema-quick-actions kbd { display: none; }
+      #user-menu-btn { min-width: 0; }
+      #header-user-name { max-width: 120px !important; }
+    }
+    @media (max-width: 767px) {
+      #app-main-scroll > main { padding-left: 18px; padding-right: 18px; padding-top: 22px; }
+      #ema-pro-welcome { padding: 22px !important; }
+      #ema-pro-welcome button { min-width: 0; flex: 1 1 0; }
+      #tab-dashboard > .grid.grid-cols-2:first-of-type .glass-card p { white-space: normal; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #app-main-scroll > header { backdrop-filter: none; -webkit-backdrop-filter: none; }
+      .glass-card { backdrop-filter: none; -webkit-backdrop-filter: none; }
+    }
+
+  </style>
+  <link rel="stylesheet" href="/ux-pro.css">
+</head>
+<body class="font-sans antialiased flex flex-col md:flex-row relative auth-pending">
+
+
+  <!-- EMA Entry Video: shown on every fresh page load -->
+  <div id="ema-entry-video" role="dialog" aria-label="EMA introduction">
+    <video
+      id="ema-entry-video-media"
+      muted
+      playsinline
+      preload="none"
+      poster="assets/ema-entry-poster.jpg"
+      data-src="assets/ema-entry.mp4"
+      aria-hidden="true"
+    >
+    </video>
+    <div id="ema-entry-progress" aria-hidden="true"><span></span></div>
+    <div id="ema-entry-status" aria-live="polite">Preparing EMA…</div>
+  </div>
+
+
+  <!-- Ambient Mesh Background (No Video) -->
+  <div class="ambient-mesh"></div>
+
+
+  <script>
+    (() => {
+      const overlay = document.getElementById('ema-entry-video');
+      const video = document.getElementById('ema-entry-video-media');
+      const progress = document.querySelector('#ema-entry-progress span');
+      const status = document.getElementById('ema-entry-status');
+      if (!overlay || !video) return;
+
+      let closed = false;
+      let started = false;
+      let startupTimer = 0;
+      let visibilityHandler = null;
+
+      const closeIntro = () => {
+        if (closed) return;
+        closed = true;
+        window.clearTimeout(startupTimer);
+        overlay.classList.remove('is-active');
+        overlay.classList.add('is-hidden');
+        try { video.pause(); } catch (_) {}
+        if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler);
+        window.setTimeout(() => overlay.remove(), 520);
+      };
+      video.addEventListener('loadedmetadata', () => {
+        if (status) status.textContent = 'EMA Autonomous Agent';
+      }, { once: true });
+      video.addEventListener('timeupdate', () => {
+        if (progress && Number.isFinite(video.duration) && video.duration > 0) {
+          progress.style.width = `${Math.min(100, (video.currentTime / video.duration) * 100)}%`;
+        }
+      }, { passive: true });
+      video.addEventListener('ended', closeIntro, { once: true });
+      video.addEventListener('error', closeIntro, { once: true });
+
+      const startIntro = async () => {
+        if (closed || started) return;
+        started = true;
+        overlay.classList.add('is-active');
+        overlay.dataset.playback = 'starting';
+        if (status) status.textContent = 'Launching EMA';
+        video.muted = true;
+        video.setAttribute('muted', '');
+        video.setAttribute('playsinline', '');
+
+        const source = video.dataset.src;
+        if (!video.src && source) video.src = source;
+        video.load();
+
+        const lowPower = document.documentElement.dataset.performance === 'eco' ||
+          document.documentElement.dataset.reducedMotion === 'true';
+        startupTimer = window.setTimeout(() => {
+          if (!closed && video.paused) closeIntro();
+        }, lowPower ? 1800 : 3200);
+
+        try {
+          if (video.readyState < 2) {
+            await new Promise(resolve => {
+              const done = () => {
+                video.removeEventListener('loadeddata', done);
+                video.removeEventListener('canplay', done);
+                video.removeEventListener('error', done);
+                resolve();
+              };
+              video.addEventListener('loadeddata', done, { once: true });
+              video.addEventListener('canplay', done, { once: true });
+              video.addEventListener('error', done, { once: true });
+            });
+          }
+          await video.play();
+          overlay.dataset.playback = 'playing';
+          if (status) status.textContent = 'EMA Autonomous Agent';
+        } catch (_) {
+          overlay.dataset.playback = 'blocked';
+          window.setTimeout(() => { if (!closed && video.paused) closeIntro(); }, 700);
+        }
+      };
+
+      visibilityHandler = () => {
+        if (!started || closed) return;
+        if (document.hidden) {
+          try { video.pause(); } catch (_) {}
+        } else if (video.paused) {
+          video.play().catch(() => {});
+        }
+      };
+
+      window.addEventListener('ema:auth-verified', startIntro, { once: true });
+      // Handles cached auth when this inline script executes after the auth promise.
+      if (window.__emaAuthVerified) startIntro();
+      document.addEventListener('visibilitychange', visibilityHandler, { passive: true });
+    })();
+  </script>
+
+
+  <div id="quick-palette-backdrop" class="quick-palette-backdrop hidden" role="dialog" aria-modal="true" aria-label="Quick actions">
+    <div class="quick-palette">
+      <input id="quick-palette-search" class="quick-palette-search" type="search" placeholder="Search actions…  (Esc to close)" autocomplete="off" />
+      <div id="quick-palette-list" class="quick-palette-list"></div>
+    </div>
+  </div>
+
+  <!-- Toast Notifications -->
+  <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- Non-Blocking Top-Right Floating Loader Pill -->
+  <div id="action-loader-toast" class="fixed top-6 right-6 z-50 pointer-events-none transition-all duration-200 opacity-0 translate-y-[-8px]">
+    <div class="glass-card px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-3 border border-indigo-500/40 bg-slate-900/95 pointer-events-auto">
+      <div class="w-4 h-4 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin"></div>
+      <span id="action-loader-text" class="text-xs font-bold text-white font-mono tracking-tight">Syncing...</span>
+    </div>
+  </div>
+
+  <!-- Event Detail / Edit / Delete Modal -->
+  <div id="event-detail-modal" onclick="handleEventDetailBackdrop(event)" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md transition-opacity duration-200 opacity-0 pointer-events-none p-4">
+    <div id="event-detail-card" class="relative w-full max-w-lg bg-[#0b1120] rounded-3xl p-6 sm:p-7 border border-white/15 shadow-2xl space-y-5">
+      <div class="flex items-center justify-between pb-3.5 border-b border-white/[0.08]">
+        <div class="flex items-center gap-3 overflow-hidden">
+          <div id="event-modal-icon-badge" class="w-10 h-10 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 flex items-center justify-center shrink-0">
+            <i data-lucide="calendar" class="w-5 h-5"></i>
+          </div>
+          <div class="overflow-hidden">
+            <h3 id="event-modal-title" class="text-sm font-bold text-white tracking-tight truncate">Event Details</h3>
+            <span id="event-modal-origin-badge" class="text-[10px] font-mono text-indigo-400 uppercase font-bold">Scheduled by EMA</span>
+          </div>
+        </div>
+        <button onclick="closeEventDetailModal()" class="text-slate-400 hover:text-white p-1 rounded-xl hover:bg-white/5 transition">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3.5 text-xs text-slate-300">
+        <div>
+          <label class="block text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold mb-1">Title</label>
+          <input type="text" id="event-edit-summary" oninput="checkEventFormDirty()" class="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white outline-none focus:border-indigo-500">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold mb-1">Start Time</label>
+            <input type="datetime-local" id="event-edit-start" oninput="checkEventFormDirty()" class="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white outline-none focus:border-indigo-500 font-mono">
+          </div>
+          <div>
+            <label class="block text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold mb-1">End Time</label>
+            <input type="datetime-local" id="event-edit-end" oninput="checkEventFormDirty()" class="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white outline-none focus:border-indigo-500 font-mono">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold mb-1">Location</label>
+          <input type="text" id="event-edit-location" oninput="checkEventFormDirty()" placeholder="e.g. Google Meet or Room 4B" class="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white outline-none focus:border-indigo-500">
+        </div>
+
+        <!-- Attached Files & Documents Section -->
+        <div id="event-files-section" class="p-3.5 rounded-2xl bg-indigo-950/20 border border-indigo-500/20 space-y-2">
+          <div class="flex items-center gap-1.5 text-indigo-400 text-[11px] font-bold">
+            <i data-lucide="paperclip" class="w-3.5 h-3.5"></i>
+            <span>Attached Evidence &amp; Files</span>
+          </div>
+          <div id="event-modal-files-list" class="flex flex-wrap gap-2 pt-0.5">
+            <span class="text-[11px] text-slate-500 italic">No attachments detected</span>
+          </div>
+        </div>
+
+        <!-- Source Email Context -->
+        <div class="p-3.5 rounded-2xl bg-white/[0.02] border border-white/[0.06] space-y-1.5">
+          <div class="flex items-center gap-1.5 text-indigo-400 text-[11px] font-bold">
+            <i data-lucide="mail" class="w-3.5 h-3.5"></i>
+            <span>Detected From Email Context</span>
+          </div>
+          <p id="event-modal-email-subject" class="text-xs text-slate-200 font-medium truncate">Email: Subject snippet</p>
+          <p id="event-modal-email-desc" class="text-[11px] text-slate-400 line-clamp-3 leading-relaxed">Description context...</p>
+        </div>
+      </div>
+
+      <div class="pt-3 border-t border-white/[0.08] flex items-center justify-between">
+        <button id="btn-delete-event" onclick="deleteCurrentEvent()" class="btn-action px-3.5 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-bold flex items-center gap-1.5">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          <span>Delete</span>
+        </button>
+        <div class="flex items-center gap-2">
+          <a id="btn-open-google-cal" href="#" target="_blank" class="btn-action px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5">
+            <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+            <span>Open in Google</span>
+          </a>
+          <button id="btn-save-event-edits" onclick="saveEventEdits()" disabled class="btn-action px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md shadow-indigo-600/30">
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Profile Management Modal -->
+  <div id="profile-modal" onclick="handleProfileModalBackdrop(event)" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md transition-opacity duration-200 opacity-0 pointer-events-none p-4">
+    <div id="profile-modal-card" class="relative w-full max-w-lg bg-[#0b1120] rounded-3xl p-6 sm:p-7 border border-white/15 shadow-2xl space-y-5">
+      <div class="flex items-center justify-between pb-3.5 border-b border-white/[0.08]">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 flex items-center justify-center shrink-0">
+            <i data-lucide="user-check" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-white tracking-tight">Profile &amp; Identity</h3>
+            <p class="text-[11px] text-slate-400">Stored privately in your personal Google Drive</p>
+          </div>
+        </div>
+        <button onclick="closeProfileModal()" class="text-slate-400 hover:text-white p-1 rounded-xl hover:bg-white/5 transition">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="space-y-2">
+        <label class="block text-[11px] font-mono uppercase tracking-wider text-slate-400 font-semibold">Display Name</label>
+        <div class="flex items-center gap-2">
+          <input type="text" id="profile-display-name-input" oninput="checkProfileFormDirty()" class="flex-1 bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none focus:border-indigo-500 font-medium" placeholder="Your Full Name">
+          <button id="btn-save-profile-name" onclick="saveProfileDisplayName()" disabled class="btn-action px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md shadow-indigo-600/30">Save</button>
+        </div>
+        <p class="text-[10px] text-slate-500">Auto-filled on first login. You can customize this anytime—only you can change it.</p>
+      </div>
+
+      <div class="space-y-2 pt-2 border-t border-white/[0.08]">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-mono uppercase tracking-wider text-slate-400 font-semibold">Connected Workspace Inboxes</span>
+          <button onclick="triggerAddAccount()" class="text-xs text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1">+ Add Inbox</button>
+        </div>
+        <div id="profile-modal-accounts-list" class="space-y-2 overflow-y-auto max-h-48 pr-1"></div>
+      </div>
+
+      <div class="pt-3 border-t border-white/[0.08] flex justify-end">
+        <button onclick="closeProfileModal()" class="btn-action px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sign Out Modal -->
+  <div id="signout-modal" onclick="handleModalBackdropClick(event)" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md transition-opacity duration-200 opacity-0 pointer-events-none p-4">
+    <div id="signout-modal-card" class="relative w-full max-w-md bg-[#0b1120] rounded-3xl p-6 border border-white/15 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+            <i data-lucide="log-out" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-white tracking-tight">Connected Accounts</h3>
+            <p class="text-[11px] text-slate-400">Disconnect individual inboxes or sign out completely</p>
+          </div>
+        </div>
+        <button onclick="closeSignOutModal()" class="text-slate-400 hover:text-white p-1 rounded-xl">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div id="signout-accounts-list" class="space-y-2.5 overflow-y-auto pr-1 max-h-60">
+        <div class="p-4 text-center text-xs text-slate-400">Loading accounts...</div>
+      </div>
+
+      <div class="pt-3 border-t border-white/[0.08] flex items-center justify-between">
+        <button onclick="handleFullSignOut()" class="btn-action px-4 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 shadow-sm">
+          <i data-lucide="power" class="w-3.5 h-3.5"></i>
+          <span>Sign Out of All</span>
+        </button>
+        <button onclick="closeSignOutModal()" class="btn-action px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile Top Bar -->
+  <header class="md:hidden flex items-center justify-between px-4 py-3 bg-[#060911]/90 backdrop-blur-md border-b border-white/[0.08] z-30">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-cyan-400 p-[1px] shadow-md">
+        <div class="w-full h-full bg-slate-950 rounded-[11px] flex items-center justify-center font-black text-white text-xs">EM</div>
+      </div>
+      <span class="text-sm font-extrabold text-white tracking-wider">EMA</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button onclick="toggleWorker()" class="p-2 rounded-xl bg-white/[0.05] border border-white/10 text-xs text-slate-300">
+        <span id="mobile-worker-dot" class="inline-block w-2 h-2 rounded-full bg-emerald-400 glow-pulse"></span>
+      </button>
+      <button type="button" onclick="toggleMobileNav()" aria-controls="mobile-drawer" aria-expanded="false" aria-label="Open navigation" class="p-2 rounded-xl bg-white/[0.05] border border-white/10 text-slate-300 hover:text-white">
+        <i data-lucide="menu" class="w-5 h-5"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Mobile Navigation Drawer -->
+  <div id="mobile-drawer" class="fixed inset-0 z-40 bg-black/85 backdrop-blur-lg hidden md:hidden flex flex-col justify-between p-6" aria-label="Mobile navigation" aria-hidden="true">
+    <div>
+      <div class="flex items-center justify-between pb-4 border-b border-white/10 mb-6">
+        <div class="flex items-center gap-2.5">
+          <div class="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-black text-xs">EM</div>
+          <span class="text-sm font-bold text-white tracking-wide">EMA Navigation</span>
+        </div>
+        <button onclick="toggleMobileNav()" class="p-1 rounded-lg text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <nav class="space-y-2">
+        <button onclick="switchTab('tab-dashboard'); toggleMobileNav();" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-slate-200 hover:bg-white/[0.08]">
+          <i data-lucide="layout-dashboard" class="w-4 h-4 text-indigo-400"></i>
+          <span>Dashboard</span>
+        </button>
+        <button onclick="switchTab('tab-accounts'); toggleMobileNav();" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-slate-200 hover:bg-white/[0.08]">
+          <i data-lucide="users" class="w-4 h-4 text-purple-400"></i>
+          <span>Accounts</span>
+        </button>
+<button onclick="switchTab('tab-calendar'); toggleMobileNav();" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-slate-200 hover:bg-white/[0.08]">
+          <i data-lucide="calendar" class="w-4 h-4 text-cyan-400"></i>
+          <span>Calendar Agenda</span>
+        </button>
+        <button onclick="switchTab('tab-drive'); toggleMobileNav();" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-slate-200 hover:bg-white/[0.08]">
+          <i data-lucide="hard-drive" class="w-4 h-4 text-rose-400"></i>
+          <span>Drive &amp; Inspect</span>
+        </button>
+        <button onclick="switchTab('tab-emails'); toggleMobileNav();" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-slate-200 hover:bg-white/[0.08]">
+          <i data-lucide="mail-check" class="w-4 h-4 text-amber-400"></i>
+          <span>Emails</span>
+        </button>
+        <button onclick="openProfileModal(); toggleMobileNav();" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-slate-200 hover:bg-white/[0.08]">
+          <i data-lucide="user" class="w-4 h-4 text-blue-400"></i>
+          <span>Profile</span>
+        </button>
+        <button onclick="switchTab('tab-settings'); toggleMobileNav();" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-slate-200 hover:bg-white/[0.08]">
+          <i data-lucide="settings" class="w-4 h-4 text-slate-400"></i>
+          <span>Settings</span>
+        </button>
+      </nav>
+    </div>
+
+    <div class="pt-4 border-t border-white/10 space-y-3">
+      <div class="flex items-center justify-between text-xs text-slate-400">
+        <a href="/privacy.html" target="_blank" class="hover:underline">Privacy Policy</a>
+        <span>•</span>
+        <a href="/terms.html" target="_blank" class="hover:underline">Terms of Service</a>
+      </div>
+      <button onclick="handleFullSignOut()" class="w-full py-2.5 rounded-xl bg-rose-500/20 text-rose-300 font-semibold text-xs border border-rose-500/30">
+        Sign Out Completely
+      </button>
+    </div>
+  </div>
+
+  <!-- Desktop Sidebar -->
+  <aside class="hidden md:flex w-[250px] min-w-[250px] bg-[#060913]/95 backdrop-blur-xl border-r border-white/[0.07] flex-col justify-between p-5 z-20">
+    <div>
+      <div class="flex items-center gap-3.5 px-1 pb-6 mb-3 border-b border-white/[0.06]">
+        <div class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-cyan-400 p-[1.5px] shadow-lg shadow-indigo-500/20 shrink-0">
+          <div class="w-full h-full bg-[#080d1a] rounded-[14px] flex items-center justify-center">
+            <span class="text-sm font-black bg-gradient-to-r from-white via-indigo-200 to-cyan-300 bg-clip-text text-transparent">EMA</span>
+          </div>
+        </div>
+        <div class="overflow-hidden leading-tight">
+          <span class="text-sm font-extrabold text-white tracking-tight block">EmailAutomater</span>
+          <span class="text-[9.5px] text-indigo-400 font-mono tracking-wider uppercase font-semibold block mt-0.5">Autonomous Agent</span>
+        </div>
+      </div>
+
+      <nav class="space-y-1.5">
+        <button onclick="switchTab('tab-dashboard')" id="btn-tab-dashboard" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-lg shadow-indigo-600/30">
+          <i data-lucide="layout-dashboard" class="w-4 h-4 text-cyan-300"></i>
+          <span>Dashboard</span>
+        </button>
+
+        <button onclick="switchTab('tab-accounts')" id="btn-tab-accounts" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/[0.05]">
+          <i data-lucide="users" class="w-4 h-4"></i>
+          <span>Accounts</span>
+        </button>
+<button onclick="switchTab('tab-calendar')" id="btn-tab-calendar" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/[0.05]">
+          <i data-lucide="calendar" class="w-4 h-4"></i>
+          <span>Calendar Agenda</span>
+        </button>
+
+        <button onclick="switchTab('tab-drive')" id="btn-tab-drive" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/[0.05]">
+          <i data-lucide="hard-drive" class="w-4 h-4"></i>
+          <span>Drive &amp; Inspect</span>
+        </button>
+
+        <button onclick="switchTab('tab-emails')" id="btn-tab-emails" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/[0.05]">
+          <i data-lucide="mail-check" class="w-4 h-4 text-amber-400"></i>
+          <span>Emails</span>
+        </button>
+
+        <button onclick="openProfileModal()" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/[0.05]">
+          <i data-lucide="user" class="w-4 h-4"></i>
+          <span>Profile</span>
+        </button>
+
+        <button onclick="switchTab('tab-settings')" id="btn-tab-settings" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/[0.05]">
+          <i data-lucide="settings" class="w-4 h-4"></i>
+          <span>Settings</span>
+        </button>
+      </nav>
+    </div>
+
+    <div class="space-y-3">
+      <div class="p-3.5 rounded-2xl bg-gradient-to-b from-white/[0.04] to-white/[0.01] border border-white/[0.08] shadow-inner space-y-1.5">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span id="sidebar-worker-dot" class="w-2 h-2 rounded-full bg-emerald-400 glow-pulse"></span>
+            <span id="sidebar-worker-status" class="text-xs font-bold text-white tracking-wide">Monitoring</span>
+          </div>
+          <span class="text-[9px] font-mono px-1.5 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-bold">LIVE</span>
+        </div>
+        <p id="sidebar-accounts-count" class="text-[11px] text-slate-400 font-medium">Monitoring 1 account</p>
+      </div>
+
+      <div class="px-2 text-[11px] text-slate-500 flex items-center justify-between">
+        <a href="/privacy.html" target="_blank" class="hover:underline hover:text-slate-300 transition">Privacy</a>
+        <span>•</span>
+        <a href="/terms.html" target="_blank" class="hover:underline hover:text-slate-300 transition">Terms</a>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Viewport -->
+  <div id="app-main-scroll" class="flex-1 flex flex-col h-[calc(100vh-57px)] md:h-screen overflow-y-auto z-10 bg-transparent">
+    
+    <!-- Top Header -->
+    <header class="relative z-30 px-6 sm:px-9 pt-6 pb-4 flex items-center justify-between gap-4 border-b border-white/[0.06] bg-[#040711]/85 backdrop-blur-md">
+      <div>
+        <h2 id="greeting-heading" class="text-xl sm:text-2xl font-black text-white tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">Welcome Back!</h2>
+        <p class="text-xs text-slate-400 mt-0.5">Your email stream is analyzed autonomously with private Drive synchronization.</p>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button id="ema-quick-actions" type="button" onclick="openQuickPalette()" class="btn-action hidden sm:flex items-center gap-2 px-3 py-2 rounded-full glass-card text-xs text-slate-300" aria-label="Open quick actions">
+          <i data-lucide="command" class="w-3.5 h-3.5 text-indigo-300"></i>
+          <span class="text-[10px] text-slate-400">Quick</span>
+          <kbd class="text-[9px] font-mono text-slate-500">Ctrl K</kbd>
+        </button>
+        <div id="ema-connection-badge" class="hidden sm:flex items-center gap-1.5 px-2.5 py-2 rounded-full bg-white/[0.03] border border-white/[0.06] text-[10px] text-slate-400" aria-live="polite">
+          <span id="ema-connection-dot" class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          <span id="ema-connection-text">Online</span>
+        </div>
+
+        <button onclick="toggleWorker()" class="btn-action flex items-center gap-2 px-3.5 py-2 rounded-full glass-card text-xs text-slate-300">
+          <span id="header-worker-dot" class="w-2 h-2 rounded-full bg-emerald-400 glow-pulse"></span>
+          <span class="hidden sm:inline text-slate-400 text-[11px]">System:</span>
+          <span id="header-worker-text" class="font-bold text-white uppercase text-[11px] tracking-wide">Running</span>
+        </button>
+
+        <div class="relative z-50" id="user-menu-wrapper">
+          <button id="user-menu-btn" onclick="toggleUserMenu(event)" class="btn-action flex items-center gap-2.5 px-3 py-1.5 rounded-full glass-card hover:border-indigo-500/50">
+            <div id="header-avatar" class="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 to-cyan-400 flex items-center justify-center text-xs font-black text-white shadow-md">
+              U
+            </div>
+            <div class="text-left overflow-hidden">
+              <div id="header-user-name" class="text-xs text-white font-bold truncate max-w-[110px] sm:max-w-[140px]">User</div>
+              <div id="header-accounts-badge" class="text-[9.5px] text-emerald-400 font-mono font-medium flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span id="header-accounts-count-text">1 Account</span>
+              </div>
+            </div>
+            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-400"></i>
+          </button>
+
+          <div id="user-dropdown-menu" class="hidden absolute right-0 top-full mt-2.5 w-72 solid-dropdown rounded-2xl shadow-2xl p-2.5 z-[999] space-y-1">
+            <div class="px-3 py-2.5 border-b border-white/[0.08] bg-white/[0.02] rounded-xl flex items-center justify-between">
+              <div class="overflow-hidden">
+                <p id="dropdown-user-name" class="text-xs font-bold text-white truncate">User</p>
+                <p id="dropdown-accounts-status" class="text-[10px] text-emerald-400 font-mono">1 Inbox Connected</p>
+              </div>
+              <button onclick="openProfileModal(); toggleUserMenu();" class="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold px-2 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/20">Edit</button>
+            </div>
+
+            <div class="py-1">
+              <p class="px-3 text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold mb-1">Active Inboxes</p>
+              <div id="dropdown-accounts-list" class="space-y-1 max-h-36 overflow-y-auto pr-1"></div>
+            </div>
+
+            <div class="pt-1 border-t border-white/[0.06] space-y-0.5">
+              <button onclick="triggerAddAccount()" class="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-200 hover:text-white hover:bg-white/[0.08] rounded-xl text-left transition font-medium">
+                <i data-lucide="user-plus" class="w-4 h-4 text-indigo-400"></i>
+                <span>Add Another Google Inbox</span>
+              </button>
+              <button onclick="openSignOutModal(); toggleUserMenu();" class="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-200 hover:text-white hover:bg-white/[0.08] rounded-xl text-left transition font-medium">
+                <i data-lucide="users" class="w-4 h-4 text-purple-400"></i>
+                <span>Manage Inboxes...</span>
+              </button>
+              <button onclick="handleFullSignOut()" class="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/15 rounded-xl text-left transition font-semibold">
+                <i data-lucide="log-out" class="w-4 h-4"></i>
+                <span>Sign Out of All</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="flex-1 px-5 sm:px-9 py-6 flex flex-col justify-between max-w-7xl w-full mx-auto relative z-10">
+      
+      <!-- TAB 1: DASHBOARD -->
+      <section id="tab-dashboard" class="space-y-6 tab-content-pane flex-1 flex flex-col">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="glass-card rounded-2xl p-4.5 flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-indigo-500/15 border border-indigo-500/25 text-indigo-400 flex items-center justify-center shrink-0 shadow-inner">
+              <i data-lucide="mail" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 id="kpi-total" class="text-2xl sm:text-3xl font-black text-white tracking-tight">0</h3>
+              <p class="text-[11.5px] font-medium text-slate-400">Emails Processed</p>
+            </div>
+          </div>
+
+          <div class="glass-card rounded-2xl p-4.5 flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-cyan-500/15 border border-cyan-500/25 text-cyan-400 flex items-center justify-center shrink-0 shadow-inner">
+              <i data-lucide="calendar" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 id="kpi-actioned" class="text-2xl sm:text-3xl font-black text-white tracking-tight">0</h3>
+              <p class="text-[11.5px] font-medium text-slate-400">Events Scheduled</p>
+            </div>
+          </div>
+
+          <div class="glass-card rounded-2xl p-4.5 flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 flex items-center justify-center shrink-0 shadow-inner">
+              <i data-lucide="hard-drive" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 id="kpi-attachments" class="text-2xl sm:text-3xl font-black text-white tracking-tight">0</h3>
+              <p class="text-[11.5px] font-medium text-slate-400">Files Saved to Drive</p>
+            </div>
+          </div>
+
+          <div class="glass-card rounded-2xl p-4.5 flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-purple-500/15 border border-purple-500/25 text-purple-400 flex items-center justify-center shrink-0 shadow-inner">
+              <i data-lucide="users" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 id="kpi-accounts-active" class="text-2xl sm:text-3xl font-black text-white tracking-tight">0</h3>
+              <p class="text-[11.5px] font-medium text-slate-400">Active Inboxes</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 flex-1 min-h-[380px]">
+          <div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between pb-3.5 border-b border-white/[0.06] mb-3.5">
+                <div class="flex items-center gap-2">
+                  <i data-lucide="sparkles" class="w-4 h-4 text-indigo-400"></i>
+                  <span class="text-sm font-bold text-white tracking-tight">Recent Activity Stream</span>
+                </div>
+                <button onclick="switchTab('tab-emails')" class="text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition">View All Mails &rarr;</button>
+              </div>
+              <div id="recent-activity-list" class="space-y-2.5 overflow-y-auto max-h-[300px] pr-1">
+                <div class="text-xs text-slate-500 py-12 text-center flex flex-col items-center justify-center gap-2">
+                  <i data-lucide="inbox" class="w-8 h-8 text-slate-600"></i>
+                  <span>No recent email activities recorded yet.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between pb-3.5 border-b border-white/[0.06] mb-3.5">
+                <div class="flex items-center gap-2">
+                  <i data-lucide="calendar-check-2" class="w-4 h-4 text-cyan-400"></i>
+                  <span class="text-sm font-bold text-white tracking-tight">Upcoming Agenda</span>
+                </div>
+                <button onclick="switchTab('tab-calendar')" class="text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition">Open Agenda &rarr;</button>
+              </div>
+              <div id="upcoming-events-list" class="space-y-2.5 overflow-y-auto max-h-[300px] pr-1">
+                <div class="text-xs text-slate-500 py-12 text-center flex flex-col items-center justify-center gap-2">
+                  <i data-lucide="calendar-x" class="w-8 h-8 text-slate-600"></i>
+                  <span>No upcoming calendar events detected.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="text-center pt-2">
+          <p class="text-xs text-slate-500 italic">&ldquo;A more organized you, one email at a time.&rdquo; <span class="text-slate-400 font-semibold not-italic">— EMA Autonomous Intelligence</span></p>
+        </div>
+      </section>
+
+      <!-- TAB 2: ACCOUNTS -->
+      <section id="tab-accounts" class="hidden space-y-4 tab-content-pane">
+        <div class="glass-card rounded-3xl p-5 sm:p-7 space-y-5">
+          <div class="flex items-center justify-between pb-4 border-b border-white/[0.06]">
+            <div>
+              <h3 class="text-sm font-bold text-white tracking-tight">Multi-Inbox Management</h3>
+              <p class="text-xs text-slate-400 mt-0.5">Toggle live monitoring or link additional Google accounts.</p>
+            </div>
+            <button onclick="triggerAddAccount()" class="btn-action flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white text-xs font-bold shadow-md shadow-indigo-600/30">
+              <i data-lucide="plus" class="w-4 h-4"></i>
+              <span>Add Google Inbox</span>
+            </button>
+          </div>
+
+          <div class="p-4 rounded-2xl bg-white/[0.02] border border-white/[0.06] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span class="text-xs font-bold text-white">Event Scheduling Destination</span>
+              <p class="text-[11px] text-slate-400">Choose where EMA should create Google Calendar invites</p>
+            </div>
+            <select id="setting-target-calendar-select" onchange="saveTargetCalendarSelection(this.value)" class="bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white outline-none focus:border-indigo-500">
+              <option value="auto">Auto (Schedule in recipient's calendar)</option>
+            </select>
+          </div>
+
+          <div id="accounts-container" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="p-4 text-xs text-slate-400">Loading accounts...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: CALENDAR -->
+      
+      <section id="tab-calendar" class="hidden space-y-4 tab-content-pane">
+        <div class="glass-card rounded-3xl p-5 sm:p-7 space-y-5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-white/[0.06]">
+            <div>
+              <h3 class="text-base font-extrabold text-white tracking-tight flex items-center gap-2">
+                <span>Google Calendar Schedule</span>
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-bold">DATE-ORDERED</span>
+              </h3>
+              <p class="text-xs text-slate-400 mt-0.5">Chronologically placed by day. Click an event to view full details, source email, and attachments.</p>
+            </div>
+            <div class="flex items-center gap-3">
+              <button onclick="loadCalendarEvents()" class="btn-action flex items-center gap-2 text-xs text-cyan-300 hover:text-white px-4 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 font-bold shadow-sm">
+                <i data-lucide="rotate-cw" class="w-3.5 h-3.5"></i>
+                <span>Sync Calendar</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Chronological Date Groupings Container -->
+          <div id="calendar-schedule-container" class="space-y-6 overflow-y-auto max-h-[600px] pr-1">
+            <div class="text-xs text-slate-500 py-12 text-center">Loading calendar events...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 5: DRIVE & INSPECT -->
+      <section id="tab-drive" class="hidden space-y-4 tab-content-pane">
+        <div class="glass-card rounded-3xl p-5 sm:p-7 space-y-6">
+          <div class="pb-3 border-b border-white/[0.06]">
+            <h3 class="text-sm font-bold text-white tracking-tight">Historical Inbox Inspection</h3>
+            <p class="text-xs text-slate-400 mt-0.5">Scans older unprocessed emails to capture events, attachments, and meeting schedules.</p>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5 font-mono">Scan Depth</label>
+              <select id="inspect-count-select" class="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-indigo-500 transition">
+                <option value="10">10 Unprocessed Emails</option>
+                <option value="20">20 Unprocessed Emails</option>
+                <option value="30">30 Unprocessed Emails</option>
+                <option value="40" selected>40 Unprocessed Emails (Max)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5 font-mono">Control</label>
+              <button id="btn-inspect-toggle" onclick="toggleInspect()" class="btn-action w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-indigo-600/30">
+                <i id="inspect-icon" data-lucide="play" class="w-4 h-4"></i>
+                <span id="inspect-btn-label">Start Scan</span>
+              </button>
+            </div>
+          </div>
+          <div class="p-4 rounded-2xl bg-slate-900/60 border border-white/5 space-y-2.5">
+            <div class="flex justify-between text-xs">
+              <span class="text-slate-400">Engine State:</span>
+              <span id="inspect-status-text" class="text-slate-200 font-semibold font-mono">Ready to inspect</span>
+            </div>
+            <div class="w-full bg-white/5 rounded-full h-2 overflow-hidden">
+              <div id="inspect-progress-bar" class="h-full bg-gradient-to-r from-indigo-500 via-cyan-400 to-emerald-400 rounded-full w-0 transition-all duration-300"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 6: EMAILS MAILBOX -->
+      <section id="tab-emails" class="hidden space-y-4 tab-content-pane flex-1 flex flex-col">
+        <div class="glass-card rounded-3xl p-5 sm:p-7 space-y-5 flex-1 flex flex-col">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-white/[0.06]">
+            <div>
+              <h3 class="text-base font-extrabold text-white tracking-tight flex items-center gap-2">
+                <span>Intelligent Mailbox</span>
+                <span id="emails-count-pill" class="text-[10px] font-mono px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-bold">0 Messages</span>
+              </h3>
+              <p class="text-xs text-slate-400 mt-0.5">Categorized messages across all connected Google accounts.</p>
+            </div>
+            <div class="relative w-full sm:w-64">
+              <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3"></i>
+              <input type="text" id="email-search-input" oninput="debounceEmailSearch()" placeholder="Search sender, subject..." class="w-full bg-slate-900 border border-white/10 rounded-xl pl-9 pr-3 py-2 text-xs text-white outline-none focus:border-indigo-500">
+            </div>
+          </div>
+
+          <!-- Active Filter Pills (With Fixed Persistent Selection) -->
+          <div class="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+            <button onclick="setEmailFilter('all')" id="filter-pill-all" class="filter-pill px-3.5 py-1.5 rounded-xl font-bold bg-indigo-600 text-white shadow-md shadow-indigo-600/30 border border-indigo-400 transition">All Messages</button>
+            <button onclick="setEmailFilter('events')" id="filter-pill-events" class="filter-pill px-3.5 py-1.5 rounded-xl font-semibold text-slate-400 hover:text-white bg-white/[0.04] border border-white/5 transition">Events on Calendar</button>
+            <button onclick="setEmailFilter('processed')" id="filter-pill-processed" class="filter-pill px-3.5 py-1.5 rounded-xl font-semibold text-slate-400 hover:text-white bg-white/[0.04] border border-white/5 transition">Processed (No Event)</button>
+            <button onclick="setEmailFilter('spam')" id="filter-pill-spam" class="filter-pill px-3.5 py-1.5 rounded-xl font-semibold text-slate-400 hover:text-white bg-white/[0.04] border border-white/5 transition">Spam / Scam</button>
+          </div>
+
+          <div id="emails-container" class="space-y-2.5 flex-1 overflow-y-auto max-h-[500px] pr-1">
+            <div class="text-xs text-slate-500 py-12 text-center">Loading email mailbox...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 7: SETTINGS & VISUAL MODES -->
+      <section id="tab-settings" class="hidden space-y-4 tab-content-pane max-w-2xl">
+        <div class="glass-card rounded-3xl p-5 sm:p-7 space-y-5">
+          <div class="pb-3 border-b border-white/[0.06]">
+            <h3 class="text-sm font-bold text-white tracking-tight">System Configuration &amp; Modes</h3>
+            <p class="text-xs text-slate-400 mt-0.5">Parameters are stored privately in your personal Google Drive.</p>
+          </div>
+
+          <div class="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-3">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <span class="text-xs font-semibold text-white">Visual Mode</span>
+                <p class="text-[11px] text-slate-500 mt-0.5">EMA stays dark by default. Read Mode softens contrast for long sessions.</p>
+              </div>
+              <span id="theme-current-badge" class="px-2 py-1 rounded-lg bg-indigo-500/15 text-indigo-300 border border-indigo-500/20 font-mono text-[10px] font-bold">CYBER DARK</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2.5 pt-1">
+              <button type="button" onclick="applyVisualMode('dark')" id="theme-btn-dark" aria-pressed="true" class="theme-btn px-3 py-2.5 rounded-xl text-xs font-bold border border-indigo-500 bg-indigo-600/20 text-white flex items-center justify-center gap-1.5">
+                <i data-lucide="moon" class="w-3.5 h-3.5"></i>
+                <span>Cyber Dark</span>
+              </button>
+              <button type="button" onclick="applyVisualMode('read')" id="theme-btn-read" aria-pressed="false" class="theme-btn px-3 py-2.5 rounded-xl text-xs font-bold border border-white/10 hover:border-white/20 text-slate-300 flex items-center justify-center gap-1.5">
+                <i data-lucide="book-open" class="w-3.5 h-3.5"></i>
+                <span>Read Mode</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between p-4 rounded-2xl bg-slate-900/50 border border-white/5">
+            <div>
+              <span class="text-xs font-semibold text-white">Require Document Evidence</span>
+              <p class="text-[11px] text-slate-400">Only schedules an event if the email contains PDF, Word, or Excel attachments.</p>
+            </div>
+            <button id="btn-file-toggle" onclick="toggleOnlyFilesSetting()" class="relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-slate-700 transition-colors">
+              <span id="btn-file-toggle-circle" class="translate-x-0 pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition"></span>
+            </button>
+          </div>
+
+          <div class="p-4 rounded-2xl bg-slate-900/50 border border-white/5 space-y-2.5">
+            <div class="flex justify-between items-center">
+              <div>
+                <span class="text-xs font-semibold text-white">AI Spam Sensitivity Threshold</span>
+                <p class="text-[11px] text-slate-400">Filters newsletters and promotional solicitations.</p>
+              </div>
+              <span id="spam-threshold-badge" class="px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-300 font-mono font-bold text-xs">50%</span>
+            </div>
+            <input type="range" id="spam-threshold-slider" min="20" max="90" step="5" value="50" oninput="onSpamThresholdSlider(this.value)" onchange="saveSpamThreshold(this.value)" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500">
+          </div>
+
+          <div class="p-4 rounded-2xl bg-slate-900/50 border border-white/5 flex items-center justify-between">
+            <div>
+              <span class="text-xs font-semibold text-white">Default Event Time</span>
+              <p class="text-[11px] text-slate-400">Applied when emails provide a date without explicit hours.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="time" id="default-timing-input" oninput="checkDefaultTimingDirty()" value="09:00" class="bg-slate-950 border border-white/10 rounded-xl px-3 py-1 text-xs text-white font-mono outline-none focus:border-indigo-500">
+              <button id="btn-save-timing" onclick="saveDefaultTiming()" disabled class="btn-action px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">Save</button>
+            </div>
+          </div>
+
+          <div class="p-4 rounded-2xl bg-slate-900/50 border border-white/5 space-y-2.5">
+            <div class="flex justify-between items-center">
+              <span class="text-xs font-semibold text-white">Custom LLM Directives</span>
+              <button id="btn-design-toggle" onclick="toggleDesignEventsSetting()" class="relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-slate-700 transition-colors">
+                <span id="btn-design-toggle-circle" class="translate-x-0 pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition"></span>
+              </button>
+            </div>
+            <textarea id="design-prompt-input" oninput="checkDesignPromptDirty()" rows="2" class="w-full bg-slate-950 border border-white/10 rounded-2xl p-3 text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-indigo-500 resize-none font-sans" placeholder="e.g. Treat project milestones as High Priority..."></textarea>
+            <div class="flex justify-end">
+              <button id="btn-save-prompt" onclick="saveDesignPrompt()" disabled class="btn-action px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">Save Directive</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script>
+    let cachedAccounts = [];
+    let cachedCalendarEvents = [];
+    let activeSelectedEventId = null;
+    let authWatcher = null;
+    let inspectWatcher = null;
+    let onlyFilesSetting = false;
+    let designEventsSetting = false;
+    let spamThresholdSetting = 50;
+    let currentFilterKey = "all";
+    let emailSearchDebounceTimer = null;
+    let emailRequestSequence = 0;
+    let calendarRequestSequence = 0;
+    let workerToggleBusy = false;
+    let loaderDepth = 0;
+    let iconRefreshTimer = 0;
+    let iconLoadListenerBound = false;
+
+    function scheduleIconRefresh() {
+      if (document.documentElement.dataset.performance === 'eco') return;
+      const hasPendingIcons = !!document.querySelector('i[data-lucide]');
+      if (!hasPendingIcons) return;
+      if (!window.lucide?.createIcons) {
+        if (!iconLoadListenerBound) {
+          iconLoadListenerBound = true;
+          window.addEventListener('load', () => scheduleIconRefresh(), { once: true });
+        }
+        return;
+      }
+      if (iconRefreshTimer) return;
+      iconRefreshTimer = window.setTimeout(() => {
+        iconRefreshTimer = 0;
+        if (!document.querySelector('i[data-lucide]')) return;
+        try { window.lucide.createIcons(); } catch (_) {}
+      }, 80);
+    }
+
+    // Baselines for Form Dirty State Verification
+    let originalProfileName = "";
+    let originalTimingValue = "09:00";
+    let originalDesignPrompt = "";
+    let originalEventModalData = {};
+
+    function showToast(msg, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      const colors = {
+        success: 'bg-emerald-950/90 border-emerald-500/40 text-emerald-300 shadow-emerald-950/50',
+        error: 'bg-rose-950/90 border-rose-500/40 text-rose-300 shadow-rose-950/50',
+        info: 'bg-slate-900/95 border-indigo-500/40 text-indigo-300 shadow-indigo-950/50'
+      };
+      toast.className = `p-3.5 rounded-2xl border shadow-2xl text-xs flex items-center gap-2.5 ${colors[type] || colors.info} pointer-events-auto transition-all duration-200 backdrop-blur-md`;
+      toast.innerHTML = `<span>${escapeHtml(msg)}</span>`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-x-4');
+        setTimeout(() => toast.remove(), 250);
+      }, 3200);
+    }
+
+    function showLoader(msg = "Synchronizing...") {
+      loaderDepth += 1;
+      const pill = document.getElementById('action-loader-toast');
+      const text = document.getElementById('action-loader-text');
+      if (text) text.innerText = msg;
+      if (pill) pill.classList.remove('opacity-0', 'translate-y-[-8px]');
+    }
+
+    function hideLoader() {
+      loaderDepth = Math.max(0, loaderDepth - 1);
+      if (loaderDepth > 0) return;
+      const pill = document.getElementById('action-loader-toast');
+      if (pill) pill.classList.add('opacity-0', 'translate-y-[-8px]');
+      if (authWatcher) { clearInterval(authWatcher); authWatcher = null; }
+    }
+
+    async function fetchJson(url, options = {}) {
+      const res = await fetch(url, options);
+      const contentType = res.headers.get('content-type') || '';
+      let data = {};
+
+      if (contentType.includes('application/json')) {
+        data = await res.json().catch(() => ({}));
+      } else {
+        const bodyText = await res.text().catch(() => '');
+        if (bodyText) data = { raw: bodyText };
+      }
+
+      if (!res.ok) {
+        const message = data?.detail || data?.message || data?.error || `Request failed (${res.status})`;
+        const error = new Error(message);
+        error.status = res.status;
+        error.data = data;
+        throw error;
+      }
+
+      return data;
+    }
+
+    function isSafeExternalUrl(value) {
+      try {
+        const url = new URL(value, window.location.origin);
+        return url.protocol === 'https:' || url.protocol === 'http:';
+      } catch {
+        return false;
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
+    function animateNumber(id, value) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const target = Number(value) || 0;
+      const current = Number((el.textContent || "0").replace(/[^\d.-]/g, "")) || 0;
+      if (current === target || document.documentElement.dataset.reducedMotion === "true") { el.textContent = String(target); return; }
+      const duration = document.documentElement.dataset.performance === "eco" ? 180 : 360;
+      const start = performance.now();
+      const step = now => {
+        const p = Math.min(1, (now - start) / duration);
+        const eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = String(Math.round(current + (target-current) * eased));
+        if (p < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }
+
+    function revealPane(pane) {
+      if (!pane) return;
+      pane.classList.remove('tab-enter');
+      void pane.offsetWidth;
+      pane.classList.add('tab-enter');
+    }
+
+    function updateGreeting(name) {
+      const hr = new Date().getHours();
+      let tod = "Evening";
+      if (hr < 12) tod = "Morning";
+      else if (hr < 17) tod = "Afternoon";
+      const displayName = name ? name.split(' ')[0] : "User";
+      document.getElementById('greeting-heading').innerText = `Good ${tod}, ${displayName}!`;
+    }
+
+    // Interactive Button Inactivity / Dirty State Checkers
+    function checkProfileFormDirty() {
+      const current = document.getElementById('profile-display-name-input').value.trim();
+      const btn = document.getElementById('btn-save-profile-name');
+      if (btn) btn.disabled = (current === originalProfileName || current.length === 0);
+    }
+
+    function checkDefaultTimingDirty() {
+      const current = document.getElementById('default-timing-input').value.trim();
+      const btn = document.getElementById('btn-save-timing');
+      if (btn) btn.disabled = (current === originalTimingValue);
+    }
+
+    function checkDesignPromptDirty() {
+      const current = document.getElementById('design-prompt-input').value.trim();
+      const btn = document.getElementById('btn-save-prompt');
+      if (btn) btn.disabled = (current === originalDesignPrompt);
+    }
+
+    function checkEventFormDirty() {
+      const summary = document.getElementById('event-edit-summary').value.trim();
+      const start = document.getElementById('event-edit-start').value;
+      const end = document.getElementById('event-edit-end').value;
+      const loc = document.getElementById('event-edit-location').value.trim();
+
+      const changed = (
+        summary !== originalEventModalData.summary ||
+        start !== originalEventModalData.start ||
+        end !== originalEventModalData.end ||
+        loc !== originalEventModalData.location
+      );
+      const btn = document.getElementById('btn-save-event-edits');
+      if (btn) btn.disabled = !changed;
+    }
+
+    const TAB_IDS = ['tab-dashboard', 'tab-accounts', 'tab-calendar', 'tab-drive', 'tab-emails', 'tab-settings'];
+    const TAB_HASHES = {
+      dashboard: 'tab-dashboard',
+      accounts: 'tab-accounts',
+      calendar: 'tab-calendar',
+      drive: 'tab-drive',
+      emails: 'tab-emails',
+      settings: 'tab-settings'
+    };
+    const tabLoadTimes = new Map();
+    const tabLoadPromises = new Map();
+
+    function loadTabData(tabId, force = false) {
+      const loaders = {
+        'tab-calendar': loadCalendarEvents,
+        'tab-accounts': loadAccounts,
+        'tab-emails': loadEmails,
+        'tab-settings': loadSettings,
+        'tab-dashboard': async () => Promise.all([loadStats(), loadDashboardActivity(), loadDashboardCalendar()])
+      };
+      const loader = loaders[tabId];
+      if (!loader) return Promise.resolve();
+      const now = Date.now();
+      const stamp = tabLoadTimes.get(tabId) || 0;
+      if (!force && now - stamp < 10000) return Promise.resolve();
+      if (tabLoadPromises.has(tabId)) return tabLoadPromises.get(tabId);
+      const promise = Promise.resolve().then(loader).finally(() => {
+        tabLoadPromises.delete(tabId);
+        tabLoadTimes.set(tabId, Date.now());
+      });
+      tabLoadPromises.set(tabId, promise);
+      return promise;
+    }
+
+    function switchTab(tabId, options = {}) {
+      if (!TAB_IDS.includes(tabId)) tabId = 'tab-dashboard';
+      const updateHash = options.updateHash !== false;
+      const activePane = document.getElementById(tabId);
+      if (!activePane) return;
+
+      TAB_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+
+        const btn = document.getElementById('btn-' + id);
+        if (btn) {
+          btn.className = "nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/[0.05]";
+          btn.setAttribute('aria-selected', 'false');
+        }
+      });
+
+      activePane.classList.remove('hidden');
+      revealPane(activePane);
+
+      const activeBtn = document.getElementById('btn-' + tabId);
+      if (activeBtn) {
+        activeBtn.className = "nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-lg shadow-indigo-600/30";
+        activeBtn.setAttribute('aria-selected', 'true');
+      }
+
+      if (updateHash) {
+        const hash = '#' + tabId.replace(/^tab-/, '');
+        if (window.location.hash !== hash) history.replaceState(null, '', hash);
+      }
+
+      const scroller = document.getElementById('app-main-scroll');
+      if (scroller) scroller.scrollTo({ top: 0, behavior: 'auto' });
+      if (options.loadData !== false) loadTabData(tabId, !!options.forceData).catch(() => {});
+      scheduleIconRefresh(activePane);
+    }
+
+    function switchTabFromHash() {
+      const key = window.location.hash.replace(/^#/, '').trim().toLowerCase();
+      switchTab(TAB_HASHES[key] || 'tab-dashboard', { updateHash: false });
+    }
+
+    function toggleMobileNav(force) {
+      const drawer = document.getElementById('mobile-drawer');
+      if (!drawer) return;
+      const shouldOpen = typeof force === 'boolean' ? force : drawer.classList.contains('hidden');
+      drawer.classList.toggle('hidden', !shouldOpen);
+      drawer.setAttribute('aria-hidden', String(!shouldOpen));
+      document.body.classList.toggle('mobile-nav-open', shouldOpen);
+      document.querySelectorAll('[aria-controls="mobile-drawer"]').forEach(btn => {
+        btn.setAttribute('aria-expanded', String(shouldOpen));
+        btn.setAttribute('aria-label', shouldOpen ? 'Close navigation' : 'Open navigation');
+      });
+    }
+
+    function toggleUserMenu(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      const m = document.getElementById('user-dropdown-menu');
+      if (!m) return;
+      const opening = m.classList.contains('hidden');
+      m.classList.toggle('hidden', !opening);
+      if (opening) {
+        const firstAction = m.querySelector('button, a');
+        if (firstAction) requestAnimationFrame(() => firstAction.focus());
+      }
+    }
+
+    window.addEventListener('click', (e) => {
+      const m = document.getElementById('user-dropdown-menu');
+      const wrapper = document.getElementById('user-menu-wrapper');
+      if (m && !m.classList.contains('hidden') && (!wrapper || !wrapper.contains(e.target))) {
+        m.classList.add('hidden');
+      }
+    });
+
+    function applyVisualMode(mode, options = {}) {
+      // Legacy light values are migrated to Cyber Dark.
+      const normalizedMode = mode === 'read' ? 'read' : 'dark';
+      const persist = options.persist !== false;
+
+      document.documentElement.setAttribute('data-theme', normalizedMode);
+      localStorage.setItem('ema_theme_mode', normalizedMode);
+
+      const badge = document.getElementById('theme-current-badge');
+      if (badge) badge.innerText = normalizedMode === 'read' ? 'READ MODE' : 'CYBER DARK';
+
+      ['dark', 'read'].forEach(m => {
+        const btn = document.getElementById('theme-btn-' + m);
+        if (!btn) return;
+        const active = m === normalizedMode;
+        btn.setAttribute('aria-pressed', String(active));
+        btn.className = active
+          ? "theme-btn px-3 py-2.5 rounded-xl text-xs font-bold border border-indigo-500 bg-indigo-600/20 text-white flex items-center justify-center gap-1.5"
+          : "theme-btn px-3 py-2.5 rounded-xl text-xs font-bold border border-white/10 hover:border-white/20 text-slate-300 flex items-center justify-center gap-1.5";
+      });
+
+      if (persist) {
+        fetch(`${BACKEND_URL}/api/settings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ theme_mode: normalizedMode })
+        }).catch(() => {
+          showToast("Theme changed locally; server preference could not be saved.", "error");
+        });
+      }
+    }
+
+    // Google Calendar Schedule Layout: Events Grouped Chronologically by Date
+    async function loadCalendarEvents() {
+      const requestId = ++calendarRequestSequence;
+      const container = document.getElementById('calendar-schedule-container');
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/calendar/upcoming?include_all=true`);
+        const data = await res.json();
+        if (requestId !== calendarRequestSequence) return;
+        cachedCalendarEvents = data.events || [];
+
+        if (!cachedCalendarEvents.length) {
+          container.innerHTML = `<div class="col-span-1 sm:col-span-2 text-xs text-slate-400 py-12 text-center">No upcoming events found in your Google Calendar.</div>`;
+          return;
+        }
+
+        // Group Chronologically by Date (Google Calendar Schedule View)
+        const groups = {};
+        cachedCalendarEvents.forEach(ev => {
+          const rawStart = ev.start?.dateTime || ev.start?.date;
+          let dateKey = "Upcoming Agenda";
+          if (rawStart) {
+            const d = new Date(rawStart);
+            dateKey = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+          }
+          if (!groups[dateKey]) groups[dateKey] = [];
+          groups[dateKey].push(ev);
+        });
+
+        let htmlOut = "";
+        for (const [dateTitle, events] of Object.entries(groups)) {
+          htmlOut += `
+            <div class="space-y-3">
+              <div class="sticky top-0 z-10 flex items-center gap-2.5 py-1.5 bg-[#0b1120]/95 backdrop-blur-md border-b border-white/[0.08]">
+                <div class="w-2 h-2 rounded-full bg-indigo-500"></div>
+                <h4 class="text-xs font-mono font-bold text-indigo-300 tracking-wide uppercase">${escapeHtml(dateTitle)}</h4>
+                <span class="text-[10px] text-slate-500 font-mono">(${events.length} event${events.length > 1 ? 's' : ''})</span>
+              </div>
+              
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pl-2">
+          `;
+
+          events.forEach(ev => {
+            const rawStart = ev.start?.dateTime || ev.start?.date;
+            const isAssistant = !!ev._is_assistant_created;
+            const timeStr = rawStart && rawStart.includes('T')
+              ? new Date(rawStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : 'All Day';
+            
+            // Check for attached evidence/files
+            const desc = ev.description || '';
+            const hasFiles = desc.includes("drive.google.com") || desc.includes("Attachment:") || (ev.attachments && ev.attachments.length > 0);
+
+            htmlOut += `
+              <div id="event-card-${ev.id}" onclick="onEventCardClick('${ev.id}')" class="calendar-event-item glass-card p-4 rounded-2xl space-y-2.5 border cursor-pointer ${isAssistant ? 'border-indigo-500/40 bg-indigo-950/20' : 'border-white/10'}">
+                <div class="flex justify-between items-start gap-2">
+                  <div class="flex items-center gap-2.5 overflow-hidden">
+                    <span class="px-2 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 font-mono text-[10px] font-bold shrink-0">${timeStr}</span>
+                    <h5 class="text-xs font-bold text-white truncate">${escapeHtml(ev.summary || 'Scheduled Event')}</h5>
+                  </div>
+                  <button onclick="event.stopPropagation(); openEventDetailModal('${ev.id}')" class="text-cyan-400 hover:text-white p-1 shrink-0 transition" title="View Details / Edit">
+                    <i data-lucide="info" class="w-3.5 h-3.5"></i>
+                  </button>
+                </div>
+
+                <div class="flex items-center justify-between text-[10px] pt-1.5 border-t border-white/[0.04]">
+                  <span class="font-mono uppercase font-semibold ${isAssistant ? 'text-indigo-400' : 'text-slate-400'}">
+                    ${isAssistant ? '⚡ Scheduled by EMA' : '📅 Google Calendar'}
+                  </span>
+                  ${hasFiles ? `<span class="px-2 py-0.5 rounded-md bg-cyan-500/15 text-cyan-300 font-mono flex items-center gap-1"><i data-lucide="paperclip" class="w-3 h-3"></i>Files Attached</span>` : ''}
+                </div>
+              </div>
+            `;
+          });
+
+          htmlOut += `</div></div>`;
+        }
+
+        container.innerHTML = htmlOut;
+        scheduleIconRefresh();
+      } catch (err) {
+        container.innerHTML = `<div class="col-span-1 sm:col-span-2 text-xs text-rose-400 py-10 text-center">Failed to load calendar events.</div>`;
+      }
+    }
+
+    function onEventCardClick(evId) {
+      if (activeSelectedEventId === evId) {
+        openEventDetailModal(evId);
+      } else {
+        activeSelectedEventId = evId;
+        document.querySelectorAll('.calendar-event-item').forEach(el => el.classList.remove('selected-event-card'));
+        const card = document.getElementById('event-card-' + evId);
+        if (card) card.classList.add('selected-event-card');
+      }
+    }
+
+    function openEventDetailModal(evId) {
+      const ev = cachedCalendarEvents.find(e => e.id === evId);
+      if (!ev) return;
+
+      document.getElementById('event-modal-title').innerText = ev.summary || 'Scheduled Event';
+      document.getElementById('event-edit-summary').value = ev.summary || '';
+      document.getElementById('event-modal-origin-badge').innerText = ev._is_assistant_created ? '⚡ Scheduled by EMA' : '📅 Google Calendar';
+
+      const rawStart = ev.start?.dateTime || ev.start?.date || '';
+      const rawEnd = ev.end?.dateTime || ev.end?.date || '';
+      const startFmt = rawStart.includes('T') ? rawStart.slice(0, 16) : rawStart;
+      const endFmt = rawEnd.includes('T') ? rawEnd.slice(0, 16) : rawEnd;
+
+      document.getElementById('event-edit-start').value = startFmt;
+      document.getElementById('event-edit-end').value = endFmt;
+      document.getElementById('event-edit-location').value = ev.location || '';
+      document.getElementById('btn-open-google-cal').href = ev.htmlLink || '#';
+
+      // Save baseline for dirty checking (starts disabled)
+      originalEventModalData = {
+        summary: ev.summary || '',
+        start: startFmt,
+        end: endFmt,
+        location: ev.location || ''
+      };
+      document.getElementById('btn-save-event-edits').disabled = true;
+
+      // Extract & Render Attached Documents / PDFs / Evidence
+      const filesContainer = document.getElementById('event-modal-files-list');
+      const desc = ev.description || '';
+      let attachmentsList = [];
+
+      if (ev.attachments && ev.attachments.length) {
+        ev.attachments.forEach(att => {
+          attachmentsList.push({ name: att.title || 'Attachment', url: att.fileUrl });
+        });
+      }
+
+      if (desc.includes("drive.google.com") || desc.includes("Attachment:") || desc.includes("File:")) {
+        const driveRegex = /(https:\/\/drive\.google\.com\/[^\s]+)/g;
+        const matches = desc.match(driveRegex) || [];
+        matches.forEach((url, i) => {
+          if (!attachmentsList.some(a => a.url === url)) {
+            attachmentsList.push({ name: `Document Evidence ${i + 1}`, url: url });
+          }
+        });
+      }
+
+      if (attachmentsList.length > 0) {
+        filesContainer.innerHTML = attachmentsList.map(att => `
+          <a href="${att.url}" target="_blank" class="px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-xs font-semibold flex items-center gap-1.5 transition">
+            <i data-lucide="file-text" class="w-3.5 h-3.5 text-indigo-400"></i>
+            <span>${escapeHtml(att.name)}</span>
+            <i data-lucide="external-link" class="w-3 h-3 text-indigo-300"></i>
+          </a>
+        `).join('');
+      } else {
+        filesContainer.innerHTML = `<span class="text-[11px] text-slate-500 italic">No document attachments detected for this event.</span>`;
+      }
+
+      document.getElementById('event-modal-email-subject').innerText = ev.summary || 'Associated Event';
+      document.getElementById('event-modal-email-desc').innerText = ev.description || 'No additional source description attached.';
+
+      const modal = document.getElementById('event-detail-modal');
+      modal.dataset.currentEventId = ev.id;
+      modal.dataset.currentCalId = ev._account_email;
+      modal.classList.remove('opacity-0', 'pointer-events-none');
+      scheduleIconRefresh();
+    }
+
+    function closeEventDetailModal() {
+      const modal = document.getElementById('event-detail-modal');
+      modal.classList.add('opacity-0', 'pointer-events-none');
+    }
+
+    function handleEventDetailBackdrop(e) {
+      if (e.target.id === 'event-detail-modal') closeEventDetailModal();
+    }
+
+    async function saveEventEdits() {
+      const modal = document.getElementById('event-detail-modal');
+      const event_id = modal.dataset.currentEventId;
+      const calendar_id = modal.dataset.currentCalId;
+      const summary = document.getElementById('event-edit-summary').value.trim();
+      const start_time = document.getElementById('event-edit-start').value;
+      const end_time = document.getElementById('event-edit-end').value;
+      const location = document.getElementById('event-edit-location').value.trim();
+
+      if (!summary || !start_time || !end_time) {
+        showToast("Please provide summary, start, and end time.", "error");
+        return;
+      }
+
+      showLoader("Updating Google Calendar event...");
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/calendar/event/update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event_id, calendar_id, summary, start_time, end_time, location })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          showToast("Event updated successfully!", "success");
+          closeEventDetailModal();
+          await loadCalendarEvents();
+        }
+      } catch (err) {
+        showToast("Error updating event", "error");
+      } finally {
+        hideLoader();
+      }
+    }
+
+    async function deleteCurrentEvent() {
+      const modal = document.getElementById('event-detail-modal');
+      const event_id = modal.dataset.currentEventId;
+      const calendar_id = modal.dataset.currentCalId;
+
+      if (!confirm("Are you sure you want to delete this event from Google Calendar?")) return;
+
+      showLoader("Deleting event...");
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/calendar/event/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event_id, calendar_id })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          showToast("Event deleted from calendar", "info");
+          closeEventDetailModal();
+          await loadCalendarEvents();
+        }
+      } catch (err) {
+        showToast("Error deleting event", "error");
+      } finally {
+        hideLoader();
+      }
+    }
+
+    // Persistent Active Button Styling & Accurate Mailbox Filtering
+    function setEmailFilter(key) {
+      currentFilterKey = key;
+
+      // Update Active Styling on Filter Buttons
+      document.querySelectorAll('.filter-pill').forEach(btn => {
+        btn.className = "filter-pill px-3.5 py-1.5 rounded-xl font-semibold text-slate-400 hover:text-white bg-white/[0.04] border border-white/5 transition";
+      });
+
+      const activeBtn = document.getElementById('filter-pill-' + key);
+      if (activeBtn) {
+        activeBtn.className = "filter-pill px-3.5 py-1.5 rounded-xl font-bold bg-indigo-600 text-white shadow-md shadow-indigo-600/30 border border-indigo-400 transition";
+      }
+
+      loadEmails();
+    }
+
+    function debounceEmailSearch() {
+      clearTimeout(emailSearchDebounceTimer);
+      emailSearchDebounceTimer = setTimeout(loadEmails, 300);
+    }
+
+    async function loadEmails() {
+      const requestId = ++emailRequestSequence;
+      const container = document.getElementById('emails-container');
+      const searchVal = document.getElementById('email-search-input')?.value || '';
+
+      let catParam = "ALL";
+      let statusParam = "ALL";
+
+      if (currentFilterKey === "events") {
+        catParam = "EVENTS_ON_CALENDAR";
+      } else if (currentFilterKey === "processed") {
+        statusParam = "PROCESSED";
+      } else if (currentFilterKey === "spam") {
+        catParam = "Spam / Scam";
+      }
+
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/emails?category_filter=${encodeURIComponent(catParam)}&status_filter=${encodeURIComponent(statusParam)}&search=${encodeURIComponent(searchVal)}&limit=50`);
+        const data = await res.json();
+        if (requestId !== emailRequestSequence) return;
+        const emails = data.emails || [];
+
+        const countPill = document.getElementById('emails-count-pill');
+        if (countPill) countPill.innerText = `${data.total ?? emails.length} Messages`;
+
+        if (!emails.length) {
+          container.innerHTML = `<div class="text-xs text-slate-500 py-12 text-center">No emails matching current filter.</div>`;
+          return;
+        }
+
+        container.innerHTML = emails.map(e => {
+          const isActioned = e.status === 'ACTIONED' || String(e.action_taken || '').toLowerCase().includes('scheduled');
+          const isSpam = e.category === 'Spam / Scam' || e.status === 'FILTERED';
+          const statusBadge = isActioned
+            ? `<span class="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-mono text-[9.5px] font-bold">CALENDAR EVENT CREATED</span>`
+            : isSpam
+            ? `<span class="px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-300 font-mono text-[9.5px] font-bold">FILTERED / SPAM</span>`
+            : `<span class="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-mono text-[9.5px] font-bold">PROCESSED</span>`;
+
+          const timeStr = e.processed_at ? new Date(e.processed_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recently';
+
+          return `
+            <div class="glass-card p-4 rounded-2xl space-y-2 hover:border-indigo-500/30 transition">
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2 overflow-hidden">
+                  ${statusBadge}
+                  <span class="text-[11px] text-slate-400 font-medium truncate">from ${escapeHtml(e.sender || 'Unknown')}</span>
+                </div>
+                <span class="text-[10px] text-slate-500 font-mono shrink-0">${timeStr}</span>
+              </div>
+              <h4 class="text-xs font-bold text-white truncate">${escapeHtml(e.subject || 'No Subject')}</h4>
+              <p class="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">${escapeHtml(e.summary || e.action_taken || '')}</p>
+            </div>
+          `;
+        }).join('');
+        scheduleIconRefresh();
+      } catch (err) {
+        container.innerHTML = `<div class="text-xs text-rose-400 py-10 text-center">Failed to load emails.</div>`;
+      }
+    }
+
+    // Profile Modal Handlers
+    function openProfileModal() {
+      const modal = document.getElementById('profile-modal');
+      modal.classList.remove('opacity-0', 'pointer-events-none');
+      renderProfileModalAccounts();
+      scheduleIconRefresh();
+    }
+
+    function closeProfileModal() {
+      document.getElementById('profile-modal').classList.add('opacity-0', 'pointer-events-none');
+    }
+
+    function handleProfileModalBackdrop(e) {
+      if (e.target.id === 'profile-modal') closeProfileModal();
+    }
+
+    function renderProfileModalAccounts() {
+      const list = document.getElementById('profile-modal-accounts-list');
+      if (!cachedAccounts.length) {
+        list.innerHTML = `<div class="p-3 text-center text-xs text-slate-400">No accounts connected.</div>`;
+        return;
+      }
+      list.innerHTML = cachedAccounts.map(acc => `
+        <div class="p-3 rounded-xl bg-slate-900 border border-white/10 flex items-center justify-between">
+          <div class="flex items-center gap-2.5 overflow-hidden">
+            <div class="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
+              ${(acc.email || 'G')[0].toUpperCase()}
+            </div>
+            <div class="overflow-hidden">
+              <p class="text-xs text-white font-medium truncate">${escapeHtml(acc.email)}</p>
+              <p class="text-[10px] text-slate-400 truncate">${escapeHtml(acc.name || 'Inbox')}</p>
+            </div>
+          </div>
+          <span class="text-[10px] px-2 py-0.5 rounded-md font-mono ${acc.is_monitored ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'}">
+            ${acc.is_monitored ? 'MONITORED' : 'PAUSED'}
+          </span>
+        </div>
+      `).join('');
+    }
+
+    async function saveProfileDisplayName() {
+      const input = document.getElementById('profile-display-name-input');
+      const newName = input.value.trim();
+      if (!newName) {
+        showToast("Display name cannot be empty", "error");
+        return;
+      }
+      showLoader("Saving profile name to Drive...");
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/user/profile`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ display_name: newName })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          showToast("Profile name updated!", "success");
+          originalProfileName = newName;
+          checkProfileFormDirty();
+          await loadUser();
+        }
+      } catch (err) {
+        showToast("Error updating profile", "error");
+      } finally {
+        hideLoader();
+      }
+    }
+
+    async function saveTargetCalendarSelection(val) {
+      showLoader("Updating target calendar...");
+      try {
+        await fetchJson(`${BACKEND_URL}/api/settings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target_calendar_account: val })
+        });
+        showToast("Calendar scheduling routing saved", "success");
+      } catch (err) {
+        showToast(err.message || "Could not save calendar routing.", "error");
+      } finally {
+        hideLoader();
+      }
+    }
+
+    async function loadUser() {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/user`);
+        const data = await res.json();
+        if (data.authenticated && data.name) {
+          const userName = data.name;
+          const totalAccs = data.total_accounts || 1;
+
+          document.getElementById('header-user-name').innerText = userName;
+          document.getElementById('header-avatar').innerText = (userName[0] || 'U').toUpperCase();
+          document.getElementById('header-accounts-count-text').innerText = `${totalAccs} Account${totalAccs > 1 ? 's' : ''}`;
+          
+          document.getElementById('dropdown-user-name').innerText = userName;
+          document.getElementById('dropdown-accounts-status').innerText = `${totalAccs} Connected Inbox${totalAccs > 1 ? 'es' : ''}`;
+          
+          document.getElementById('profile-display-name-input').value = userName;
+          originalProfileName = userName;
+          checkProfileFormDirty();
+
+          updateGreeting(userName);
+          document.getElementById('sidebar-accounts-count').innerText = `Monitoring ${totalAccs} inbox${totalAccs > 1 ? 'es' : ''}`;
+          document.getElementById('kpi-accounts-active').innerText = data.monitored_accounts ?? totalAccs;
+
+          const targetSelect = document.getElementById('setting-target-calendar-select');
+          if (data.accounts && targetSelect) {
+            targetSelect.innerHTML = `<option value="auto">Auto (Schedule in recipient's calendar)</option>` +
+              data.accounts.map(a => `<option value="${a.email}">${escapeHtml(a.email)} (Personal Calendar)</option>`).join('');
+            if (data.target_calendar) targetSelect.value = data.target_calendar;
+          }
+
+          const dropList = document.getElementById('dropdown-accounts-list');
+          if (data.accounts && data.accounts.length) {
+            cachedAccounts = data.accounts;
+            dropList.innerHTML = data.accounts.map(acc => `
+              <div class="px-3 py-1.5 rounded-lg bg-white/[0.02] flex items-center justify-between text-xs">
+                <span class="truncate max-w-[170px] text-slate-300">${escapeHtml(acc.email)}</span>
+                <span class="w-1.5 h-1.5 rounded-full ${acc.is_monitored ? 'bg-emerald-400 glow-pulse' : 'bg-slate-500'}"></span>
+              </div>
+            `).join('');
+          }
+        } else {
+          localStorage.removeItem("assistant_session_id");
+          window.location.replace("/login.html");
+        }
+      } catch (e) {
+        window.location.replace("/login.html");
+      }
+    }
+
+    async function loadAccounts() {
+      const container = document.getElementById('accounts-container');
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/accounts`);
+        const data = await res.json();
+        cachedAccounts = data.accounts || [];
+
+        const activeCount = cachedAccounts.filter(a => a.is_monitored).length;
+        document.getElementById('kpi-accounts-active').innerText = activeCount;
+        document.getElementById('sidebar-accounts-count').innerText = `Monitoring ${cachedAccounts.length} account${cachedAccounts.length !== 1 ? 's' : ''}`;
+
+        if (!cachedAccounts.length) {
+          container.innerHTML = `<div class="col-span-1 sm:col-span-2 p-5 text-xs text-slate-400">No connected accounts. Click "Add Google Inbox" to begin.</div>`;
+          return;
+        }
+
+        container.innerHTML = cachedAccounts.map(acc => `
+          <div class="p-4 rounded-2xl bg-slate-900/90 border border-white/10 flex items-center justify-between hover:border-indigo-500/30 transition">
+            <div class="flex items-center gap-3 overflow-hidden">
+              <div class="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-md">
+                ${(acc.email || 'G')[0].toUpperCase()}
+              </div>
+              <div class="overflow-hidden">
+                <p class="text-xs font-bold text-white truncate">${escapeHtml(acc.name || acc.email)}</p>
+                <p class="text-[10px] text-slate-400 truncate">${escapeHtml(acc.email)}</p>
+              </div>
+            </div>
+            <button onclick="toggleAccount('${acc.email}', ${!acc.is_monitored})" class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent ${acc.is_monitored ? 'bg-indigo-600' : 'bg-slate-700'} transition-colors">
+              <span class="${acc.is_monitored ? 'translate-x-4' : 'translate-x-0'} pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition"></span>
+            </button>
+          </div>
+        `).join('');
+      } catch (err) {
+        container.innerHTML = `<div class="col-span-1 sm:col-span-2 p-4 text-xs text-rose-400">Failed to load accounts. Please check server logs.</div>`;
+      }
+    }
+
+    async function toggleAccount(email, status) {
+      showLoader("Updating inbox status...");
+      try {
+        await fetchJson(`${BACKEND_URL}/api/accounts/toggle`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email, is_monitored: status })
+        });
+        await Promise.all([loadAccounts(), loadStats()]);
+        await loadUser();
+        showToast(`Inbox monitoring ${status ? 'enabled' : 'paused'}`, 'success');
+      } catch (err) {
+        showToast(err.message || "Unable to update inbox status.", 'error');
+      } finally {
+        hideLoader();
+      }
+    }
+
+    function triggerAddAccount() {
+      showLoader('Connecting to Google Sign-In...');
+      const sessionId = localStorage.getItem("assistant_session_id") || crypto.randomUUID();
+      localStorage.setItem("assistant_session_id", sessionId);
+
+      window.location.href = `${BACKEND_URL}/auth/login?session_id=${sessionId}&browser=1`;
+    }
+
+    function openSignOutModal() {
+      const container = document.getElementById('signout-accounts-list');
+      if (!cachedAccounts.length) {
+        container.innerHTML = `<div class="p-4 text-center text-xs text-slate-400">No accounts connected.</div>`;
+      } else {
+        container.innerHTML = cachedAccounts.map(acc => `
+          <div class="p-3.5 rounded-2xl bg-slate-900 border border-white/10 flex items-center justify-between">
+            <p class="text-xs text-white truncate max-w-[220px] font-medium">${escapeHtml(acc.email)}</p>
+            <button onclick="signOutSpecificAccount('${acc.email}')" class="btn-action px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-400 text-xs font-bold hover:bg-rose-500/20 border border-rose-500/20">Disconnect</button>
+          </div>
+        `).join('');
+      }
+      const modal = document.getElementById('signout-modal');
+      modal.classList.remove('opacity-0', 'pointer-events-none');
+      scheduleIconRefresh();
+    }
+
+    function closeSignOutModal() {
+      document.getElementById('signout-modal').classList.add('opacity-0', 'pointer-events-none');
+    }
+
+    function handleModalBackdropClick(e) {
+      if (e.target.id === 'signout-modal') closeSignOutModal();
+    }
+
+    async function signOutSpecificAccount(email) {
+      showLoader("Disconnecting inbox...");
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/accounts/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email })
+        });
+        const data = await res.json();
+        closeSignOutModal();
+        if (data.remaining === 0) {
+          await handleFullSignOut();
+        } else {
+          await loadAccounts();
+          await loadUser();
+          showToast(`Disconnected ${email}`, 'info');
+        }
+      } catch (err) {
+        showToast("Error disconnecting account", "error");
+      } finally {
+        hideLoader();
+      }
+    }
+
+    async function handleFullSignOut() {
+      showLoader("Signing out completely...");
+      try {
+        await fetch(`${BACKEND_URL}/auth/logout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+      } catch (err) {
+        console.warn("Logout request failed:", err);
+      } finally {
+        localStorage.removeItem("assistant_session_id");
+        window.location.replace("/login.html");
+      }
+    }
+
+    async function loadStats() {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/stats`);
+        const data = await res.json();
+        if (data.summary) {
+          animateNumber('kpi-total', data.summary.total);
+          animateNumber('kpi-actioned', data.summary.actioned);
+          animateNumber('kpi-attachments', data.summary.filtered || 0);
+        }
+        const running = data.worker && data.worker.is_running;
+        const text = running ? "Running" : "Idle";
+        document.getElementById('header-worker-text').innerText = text;
+        document.getElementById('sidebar-worker-status').innerText = text;
+
+        const dotClass = running ? "bg-emerald-400 glow-pulse" : "bg-slate-500";
+        document.getElementById('header-worker-dot').className = `w-2 h-2 rounded-full ${dotClass}`;
+        document.getElementById('sidebar-worker-dot').className = `w-2 h-2 rounded-full ${dotClass}`;
+        const mobDot = document.getElementById('mobile-worker-dot');
+        if (mobDot) mobDot.className = `inline-block w-2 h-2 rounded-full ${dotClass}`;
+      } catch (err) {}
+    }
+
+    async function toggleWorker() {
+      if (workerToggleBusy) return;
+      workerToggleBusy = true;
+      const statusText = document.getElementById('header-worker-text')?.innerText || '';
+      const isRunning = /running/i.test(statusText);
+      showLoader(isRunning ? "Pausing Assistant..." : "Activating Assistant...");
+      try {
+        await fetchJson(`${BACKEND_URL}${isRunning ? '/api/worker/stop' : '/api/worker/start'}`, { method: 'POST' });
+        await loadStats();
+        showToast(isRunning ? "Monitoring paused" : "Autonomous monitoring active", "info");
+      } catch (err) {
+        showToast(err.message || "Unable to update assistant status.", "error");
+      } finally {
+        workerToggleBusy = false;
+        hideLoader();
+      }
+    }
+
+    async function loadDashboardActivity() {
+      const container = document.getElementById('recent-activity-list');
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/emails?category_filter=ALL&limit=6`);
+        const data = await res.json();
+        const emails = data.emails || [];
+
+        if (!emails.length) {
+          container.innerHTML = `
+            <div class="text-xs text-slate-500 py-10 text-center flex flex-col items-center justify-center gap-2">
+              <i data-lucide="inbox" class="w-8 h-8 text-slate-600"></i>
+              <span>No recent email activities recorded yet.</span>
+            </div>
+          `;
+          scheduleIconRefresh();
+          return;
+        }
+
+        container.innerHTML = emails.map(e => {
+          let badgeColor = "bg-indigo-500/15 text-indigo-400 border border-indigo-500/20";
+          let iconName = "mail";
+
+          if (e.category === 'Meeting & Event') { badgeColor = "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"; iconName = "check"; }
+          else if (e.category === 'Spam / Scam') { badgeColor = "bg-rose-500/15 text-rose-400 border border-rose-500/20"; iconName = "shield-alert"; }
+          else if (e.action_taken && e.action_taken.includes("Attachment")) { badgeColor = "bg-cyan-500/15 text-cyan-400 border border-cyan-500/20"; iconName = "file-text"; }
+
+          const timeStr = e.processed_at ? new Date(e.processed_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : 'Recently';
+
+          return `
+            <div class="flex items-center justify-between p-3 rounded-2xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.05] transition">
+              <div class="flex items-center gap-3 overflow-hidden">
+                <div class="w-8 h-8 rounded-xl ${badgeColor} flex items-center justify-center shrink-0">
+                  <i data-lucide="${iconName}" class="w-4 h-4"></i>
+                </div>
+                <div class="overflow-hidden">
+                  <h4 class="text-xs font-bold text-white truncate">${escapeHtml(e.subject || 'Scheduled Event')}</h4>
+                  <p class="text-[10px] text-slate-400 truncate">from ${escapeHtml(e.sender || 'Inbox')}</p>
+                </div>
+              </div>
+              <span class="text-[10px] text-slate-500 shrink-0 font-mono">${timeStr}</span>
+            </div>
+          `;
+        }).join('');
+        scheduleIconRefresh();
+      } catch (err) {}
+    }
+
+    async function loadDashboardCalendar() {
+      const container = document.getElementById('upcoming-events-list');
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/calendar/upcoming?include_all=true`);
+        const data = await res.json();
+        const events = data.events || [];
+
+        if (!events.length) {
+          container.innerHTML = `
+            <div class="text-xs text-slate-500 py-10 text-center flex flex-col items-center justify-center gap-2">
+              <i data-lucide="calendar-x" class="w-8 h-8 text-slate-600"></i>
+              <span>No upcoming calendar events detected.</span>
+            </div>
+          `;
+          scheduleIconRefresh();
+          return;
+        }
+
+        container.innerHTML = events.slice(0, 4).map(ev => {
+          const rawStart = ev.start.dateTime || ev.start.date;
+          const formattedDate = new Date(rawStart).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+          const isMeet = (ev.htmlLink && ev.htmlLink.includes("meet")) || (ev.location && ev.location.includes("http"));
+
+          return `
+            <div class="p-3 rounded-2xl bg-white/[0.02] border border-white/[0.04] flex items-center gap-3 hover:bg-white/[0.05] transition">
+              <div class="w-9 h-9 rounded-xl ${isMeet ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/20' : 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/20'} flex items-center justify-center shrink-0">
+                <i data-lucide="${isMeet ? 'video' : 'calendar'}" class="w-4 h-4"></i>
+              </div>
+              <div class="flex-1 overflow-hidden">
+                <h4 class="text-xs font-bold text-white truncate">${escapeHtml(ev.summary || 'Scheduled Meeting')}</h4>
+                <div class="text-[11px] text-slate-400">${formattedDate}</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+        scheduleIconRefresh();
+      } catch (err) {}
+    }
+
+    async function loadSettings() {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/settings`);
+        const data = await res.json();
+
+        onlyFilesSetting = !!data.only_remind_with_files;
+        renderSettingsToggle('btn-file-toggle', 'btn-file-toggle-circle', onlyFilesSetting);
+
+        designEventsSetting = !!data.design_events_enabled;
+        renderSettingsToggle('btn-design-toggle', 'btn-design-toggle-circle', designEventsSetting);
+
+        spamThresholdSetting = data.spam_threshold || 50;
+        document.getElementById('spam-threshold-slider').value = spamThresholdSetting;
+        onSpamThresholdSlider(spamThresholdSetting);
+
+        if (data.default_timing) {
+          document.getElementById('default-timing-input').value = data.default_timing;
+          originalTimingValue = data.default_timing;
+          checkDefaultTimingDirty();
+        }
+        if (data.design_events_prompt) {
+          document.getElementById('design-prompt-input').value = data.design_events_prompt;
+          originalDesignPrompt = data.design_events_prompt;
+          checkDesignPromptDirty();
+        }
+        if (data.theme_mode === 'light') {
+          applyVisualMode('dark');
+        } else if (data.theme_mode) {
+          applyVisualMode(data.theme_mode, { persist: false });
+        }
+      } catch (err) {}
+    }
+
+    function renderSettingsToggle(buttonId, circleId, enabled) {
+      const circle = document.getElementById(circleId);
+      const button = document.getElementById(buttonId);
+      if (circle) {
+        circle.className = enabled
+          ? "translate-x-5 pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition"
+          : "translate-x-0 pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition";
+      }
+      if (button) {
+        button.className = enabled
+          ? "relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-indigo-600 transition-colors"
+          : "relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-slate-700 transition-colors";
+        button.setAttribute('aria-pressed', String(enabled));
+      }
+    }
+
+    function onSpamThresholdSlider(v) {
+      document.getElementById('spam-threshold-badge').innerText = `${v}%`;
+    }
+
+    async function saveSpamThreshold(v) {
+      const nextValue = parseInt(v, 10);
+      const previous = spamThresholdSetting;
+      spamThresholdSetting = nextValue;
+
+      try {
+        await fetchJson(`${BACKEND_URL}/api/settings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ spam_threshold: nextValue })
+        });
+        showToast(`AI Spam Sensitivity set to ${nextValue}%`, 'success');
+      } catch (err) {
+        spamThresholdSetting = previous;
+        const slider = document.getElementById('spam-threshold-slider');
+        if (slider) slider.value = previous;
+        onSpamThresholdSlider(previous);
+        showToast(err.message || "Could not save spam sensitivity.", 'error');
+      }
+    }
+
+    async function toggleOnlyFilesSetting() {
+      const previous = onlyFilesSetting;
+      onlyFilesSetting = !onlyFilesSetting;
+      renderSettingsToggle('btn-file-toggle', 'btn-file-toggle-circle', onlyFilesSetting);
+
+      try {
+        await fetchJson(`${BACKEND_URL}/api/settings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ only_remind_with_files: onlyFilesSetting })
+        });
+        showToast(`Document Evidence Requirement: ${onlyFilesSetting ? 'Enabled' : 'Disabled'}`, 'info');
+      } catch (err) {
+        onlyFilesSetting = previous;
+        renderSettingsToggle('btn-file-toggle', 'btn-file-toggle-circle', onlyFilesSetting);
+        showToast(err.message || "Could not update document requirement.", 'error');
+      }
+    }
+
+    async function toggleDesignEventsSetting() {
+      const previous = designEventsSetting;
+      designEventsSetting = !designEventsSetting;
+      renderSettingsToggle('btn-design-toggle', 'btn-design-toggle-circle', designEventsSetting);
+
+      try {
+        await fetchJson(`${BACKEND_URL}/api/settings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ design_events_enabled: designEventsSetting })
+        });
+        showToast(`Custom Directive: ${designEventsSetting ? 'Active' : 'Disabled'}`, 'info');
+      } catch (err) {
+        designEventsSetting = previous;
+        renderSettingsToggle('btn-design-toggle', 'btn-design-toggle-circle', designEventsSetting);
+        showToast(err.message || "Could not update custom directives.", 'error');
+      }
+    }
+
+    async function saveDefaultTiming() {
+      const v = document.getElementById('default-timing-input')?.value || '';
+      if (!v) {
+        showToast("Choose a default event time first.", "error");
+        return;
+      }
+
+      showLoader("Saving default event time...");
+      try {
+        await fetchJson(`${BACKEND_URL}/api/settings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ default_timing: v })
+        });
+        originalTimingValue = v;
+        checkDefaultTimingDirty();
+        showToast(`Default Event Time saved as ${v}`, 'success');
+      } catch (err) {
+        showToast(err.message || "Could not save default event time.", "error");
+      } finally {
+        hideLoader();
+      }
+    }
+
+    async function saveDesignPrompt() {
+      const v = document.getElementById('design-prompt-input')?.value.trim() || '';
+      if (!v) {
+        showToast("Enter a directive before saving.", "error");
+        return;
+      }
+
+      showLoader("Saving custom directive...");
+      try {
+        await fetchJson(`${BACKEND_URL}/api/settings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ design_events_prompt: v, design_events_enabled: true })
+        });
+        designEventsSetting = true;
+        originalDesignPrompt = v;
+        checkDesignPromptDirty();
+        renderSettingsToggle('btn-design-toggle', 'btn-design-toggle-circle', true);
+        showToast("Custom directive saved to private Drive!", 'success');
+      } catch (err) {
+        showToast(err.message || "Could not save custom directive.", "error");
+      } finally {
+        hideLoader();
+      }
+    }
+async function toggleInspect() {
+      const isRunning = document.getElementById('inspect-btn-label').innerText.includes("Stop");
+
+      try {
+      if (isRunning) {
+        await fetchJson(`${BACKEND_URL}/api/inspect/stop`, { method: 'POST' });
+        document.getElementById('inspect-btn-label').innerText = "Start Scan";
+        document.getElementById('inspect-status-text').innerText = "Scan stopping...";
+        if (inspectWatcher) { clearInterval(inspectWatcher); inspectWatcher = null; }
+        return;
+      }
+
+      const count = parseInt(document.getElementById('inspect-count-select').value, 10);
+      await fetchJson(`${BACKEND_URL}/api/inspect/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count })
+      });
+
+      document.getElementById('inspect-btn-label').innerText = "Stop Scan";
+      startInspectPolling();
+      } catch (err) {
+        showToast(err.message || "Unable to update inspection.", "error");
+      }
+    }
+
+    function startInspectPolling() {
+      if (inspectWatcher) clearInterval(inspectWatcher);
+
+      inspectWatcher = setInterval(async () => {
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/inspect/status`);
+          const data = await res.json();
+
+          const statusText = document.getElementById('inspect-status-text');
+          const progressBar = document.getElementById('inspect-progress-bar');
+          const btnLabel = document.getElementById('inspect-btn-label');
+
+          if (statusText) statusText.innerText = data.status_message || "Scanning...";
+
+          const target = data.target_count || 10;
+          const current = data.current_count || 0;
+          const pct = Math.min(100, Math.round((current / target) * 100));
+          if (progressBar) progressBar.style.width = `${pct}%`;
+
+          if (!data.is_running) {
+            clearInterval(inspectWatcher);
+            inspectWatcher = null;
+            if (btnLabel) btnLabel.innerText = "Start Scan";
+            await loadStats();
+            await loadDashboardActivity();
+            await loadDashboardCalendar();
+          }
+        } catch (err) {}
+      }, 1000);
+    }
+
+    const QUICK_ACTIONS = [
+      {label:"Dashboard",icon:"layout-dashboard",run:()=>switchTab("tab-dashboard")},
+      {label:"Accounts",icon:"users",run:()=>switchTab("tab-accounts")},
+      {label:"Calendar Agenda",icon:"calendar-days",run:()=>switchTab("tab-calendar")},
+      {label:"Drive & Inspect",icon:"hard-drive",run:()=>switchTab("tab-drive")},
+      {label:"Emails",icon:"mail-check",run:()=>switchTab("tab-emails")},
+      {label:"Settings",icon:"settings",run:()=>switchTab("tab-settings")},
+      {label:"Open Profile",icon:"user",run:()=>openProfileModal()},
+      {label:"Sign Out of All",icon:"log-out",run:()=>handleFullSignOut()}
+    ];
+    let quickPaletteIndex = 0;
+
+    function renderQuickPalette(filter="") {
+      const list=document.getElementById("quick-palette-list");
+      if(!list) return;
+      const term=String(filter).trim().toLowerCase();
+      const matches=QUICK_ACTIONS.filter(x=>!term||x.label.toLowerCase().includes(term));
+      quickPaletteIndex=Math.min(quickPaletteIndex,Math.max(matches.length-1,0));
+      list.innerHTML=matches.map((item,i)=>`<button class="quick-palette-item" aria-current="${i===quickPaletteIndex}" data-quick-index="${i}" type="button"><i data-lucide="${item.icon}" class="w-4 h-4 text-indigo-300"></i><span>${escapeHtml(item.label)}</span><span class="quick-palette-key">${i===0?"ENTER":""}</span></button>`).join("") || '<div class="p-5 text-xs text-slate-500 text-center">No matching action.</div>';
+      list.querySelectorAll("[data-quick-index]").forEach(btn=>btn.addEventListener("click",()=>{ const action=matches[Number(btn.dataset.quickIndex)]; closeQuickPalette(); action?.run(); }));
+      scheduleIconRefresh();
+    }
+    function openQuickPalette(){
+      const modal=document.getElementById("quick-palette-backdrop");
+      if(!modal) return;
+      modal.classList.remove("hidden");
+      quickPaletteIndex=0;
+      renderQuickPalette("");
+      requestAnimationFrame(()=>document.getElementById("quick-palette-search")?.focus());
+    }
+    function closeQuickPalette(){ document.getElementById("quick-palette-backdrop")?.classList.add("hidden"); }
+    document.getElementById("quick-palette-backdrop")?.addEventListener("click",e=>{ if(e.target.id==="quick-palette-backdrop") closeQuickPalette(); });
+    document.getElementById("quick-palette-search")?.addEventListener("input",e=>{ quickPaletteIndex=0; renderQuickPalette(e.target.value); });
+
+    window.addEventListener('hashchange', switchTabFromHash);
+
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        const modal=document.getElementById('quick-palette-backdrop');
+        if (modal && !modal.classList.contains('hidden')) closeQuickPalette();
+        else openQuickPalette();
+        return;
+      }
+      const palette=document.getElementById('quick-palette-backdrop');
+      if (palette && !palette.classList.contains('hidden')) {
+        const items=[...palette.querySelectorAll('[data-quick-index]')];
+        if (e.key==='Escape') { closeQuickPalette(); return; }
+        if (items.length && (e.key==='ArrowDown'||e.key==='ArrowUp'||e.key==='Enter')) {
+          if (e.key==='ArrowDown') quickPaletteIndex=Math.min(items.length-1,quickPaletteIndex+1);
+          if (e.key==='ArrowUp') quickPaletteIndex=Math.max(0,quickPaletteIndex-1);
+          items.forEach((el,i)=>el.setAttribute('aria-current',String(i===quickPaletteIndex)));
+          if (e.key==='Enter') items[quickPaletteIndex]?.click();
+          return;
+        }
+      }
+      if (e.key !== 'Escape') return;
+
+      const drawer = document.getElementById('mobile-drawer');
+      if (drawer && !drawer.classList.contains('hidden')) {
+        toggleMobileNav(false);
+        return;
+      }
+
+      const userMenu = document.getElementById('user-dropdown-menu');
+      if (userMenu && !userMenu.classList.contains('hidden')) {
+        userMenu.classList.add('hidden');
+      }
+
+      const eventModal = document.getElementById('event-detail-modal');
+      const profileModal = document.getElementById('profile-modal');
+      const signoutModal = document.getElementById('signout-modal');
+
+      if (eventModal && !eventModal.classList.contains('pointer-events-none')) closeEventDetailModal();
+      if (profileModal && !profileModal.classList.contains('pointer-events-none')) closeProfileModal();
+      if (signoutModal && !signoutModal.classList.contains('pointer-events-none')) closeSignOutModal();
+    });
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      scheduleIconRefresh();
+
+      function updateConnectionBadge() {
+        const dot=document.getElementById('ema-connection-dot');
+        const text=document.getElementById('ema-connection-text');
+        if(!dot||!text) return;
+        const online=navigator.onLine !== false;
+        dot.className=`w-1.5 h-1.5 rounded-full ${online?'bg-emerald-400':'bg-rose-400'}`;
+        text.textContent=online?'Online':'Offline';
+      }
+      updateConnectionBadge();
+      window.addEventListener('online', updateConnectionBadge, {passive:true});
+      window.addEventListener('offline', updateConnectionBadge, {passive:true});
+      fetch(`${BACKEND_URL}/health`, {credentials:'include'}).then(r=>r.json()).then(d=>{
+        const badge=document.getElementById('ema-connection-badge');
+        const text=document.getElementById('ema-connection-text');
+        if(badge&&text&&d?.status==='ok'){
+          text.textContent=d.is_lean===true?'Online · Lean':'Online';
+          badge.title=`Server RAM: ${d.memory_mb ?? '?'} MB`;
+        }
+      }).catch(()=>{});
+
+      const savedTheme = localStorage.getItem('ema_theme_mode');
+      applyVisualMode(savedTheme === 'read' ? 'read' : 'dark', { persist: false });
+
+      const authenticated = await (window.__emaAuthPromise || Promise.resolve(window.__emaAuthVerified));
+      if (!authenticated) return;
+
+      await loadUser();
+      const initialTab = TAB_HASHES[window.location.hash.replace(/^#/, '').trim().toLowerCase()] || 'tab-dashboard';
+      await loadTabData(initialTab, true);
+      switchTab(initialTab, { updateHash: false, loadData: false });
+
+      setInterval(() => {
+         if (document.hidden || !window.__emaAuthVerified) return;
+         if (activeTab === 'tab-dashboard') {
+           Promise.all([loadStats(), loadDashboardActivity()]).catch(() => {});
+         }
+       }, 60000);
+
+      setInterval(() => {
+        if (!document.hidden && window.__emaAuthVerified) fetch(`${BACKEND_URL}/health`, {credentials:'include'}).catch(()=>{});
+      }, 300000);
+    });
+  </script>
+  <script src="/ux-pro.js"></script>
+</body>
+</html>

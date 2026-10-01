@@ -1,0 +1,32 @@
+# Secrets & Environment Variables (CRITICAL)
+.env
+.env.*
+*.key
+*.pem
+
+# Python Virtual Environments & Caches
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# App State & Local Profiles
+*.db
+*.db-journal
+*.log
+ema_errors.jsonl
+.state_shadow_*.json
+backend/*.log
+.browser_session/
+app_profile/
+
+# Inno Setup & Build Artifacts
+Output/
+*.exe
+
+# OS & Editor Metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

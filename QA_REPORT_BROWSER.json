@@ -1,0 +1,31 @@
+{
+  "user_pageerrors_initial": [
+    "skip is not defined"
+  ],
+  "user_entry_video_state": {
+    "src": null,
+    "dataSrc": "assets/ema-entry.mp4",
+    "played": false
+  },
+  "user_fetch_call_count": 10,
+  "user_email_call_count": 2,
+  "user_unauth_video_markup": {
+    "src": null,
+    "dataSrc": "assets/ema-entry.mp4"
+  },
+  "login_pageerrors": [],
+  "admin_pageerrors": [],
+  "admin_entry_dom_state": {
+    "hidden": false,
+    "classes": ""
+  },
+  "admin_entry_video_state": {
+    "src": "/assets/ema-entry.mp4",
+    "played": true
+  },
+  "status": "FAIL",
+  "failures": [
+    "user page error: skip is not defined",
+    "user entry video did not start after auth in browser harness"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "status": "PASS",
+  "checks": {
+    "python_compile": true,
+    "javascript_syntax": true,
+    "inline_click_handlers_defined": true,
+    "dashboard_poll_does_not_reload_full_dashboard": true,
+    "index.html_duplicate_ids": true,
+    "terminal_logs_removed": true,
+    "login.html_duplicate_ids": true,
+    "entry_video_present": true,
+    "entry_poster_present": true,
+    "entry_video_auth_gating": true,
+    "no_perpetual_pointer_raf": true,
+    "no_body_mutation_observer": true,
+    "no_repeated_kpi_observer": true,
+    "no_perpetual_login_animation": true,
+    "no_perpetual_admin_pulse": true,
+    "main_scroll_not_smooth_css": true,
+    "local_env_precedence_fixed": true,
+    "admin_pbkdf2": true,
+    "admin_retry_after": true,
+    "backend_route_count": 61,
+    "backend_has_health": true,
+    "backend_has_admin_login": true,
+    "entry_video_ffprobe": true
+  },
+  "failures": []
+}

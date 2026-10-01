@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050811">
+<meta name="color-scheme" content="dark">
+<title>EMA • Admin Control Center</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script defer src="https://unpkg.com/lucide@latest"></script>
+<link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+<div class="admin-bg"><span></span><span></span><span></span></div>
+<div id="admin-login" class="admin-auth-screen" hidden>
+  <div class="login-grid"><div class="login-brand-panel">
+    <div class="brand-lockup"><img src="/assets/logo.png" alt="EMA" onerror="this.src='/favicon.ico'"><div><strong>EMA</strong><span>ADMIN CONTROL CENTER</span></div></div>
+    <div class="login-hero"><span class="eyebrow">Restricted operations</span><h1>Operate EMA<br><em>with clarity.</em></h1><p>Live visibility into accounts, AI processing, background workers, diagnostics and system state.</p></div>
+    <div class="login-trust"><span><i data-lucide="shield-check"></i> Server-authenticated</span><span><i data-lucide="lock-keyhole"></i> HttpOnly session</span><span><i data-lucide="activity"></i> Live telemetry</span></div>
+  </div>
+  <div class="login-form-panel">
+    <div class="login-form-card">
+      <div class="form-kicker">ADMIN ACCESS</div>
+      <h2>Sign in to EMA</h2>
+      <p class="muted">Enter the administrator credentials configured on the server.</p>
+      <form id="admin-login-form" autocomplete="off">
+        <label>Username<input id="admin-username" type="text" autocomplete="username" maxlength="120" required placeholder="Administrator username"></label>
+        <label>Password<div class="password-wrap"><input id="admin-password" type="password" autocomplete="current-password" maxlength="256" required placeholder="Administrator password"><button type="button" id="toggle-admin-password" class="icon-btn" aria-label="Show password"><i data-lucide="eye"></i></button></div></label>
+        <div id="admin-login-error" class="auth-error" hidden></div>
+        <button id="admin-login-submit" class="primary-btn auth-submit" type="submit"><span>Enter Control Center</span><i data-lucide="arrow-right"></i></button>
+      </form>
+      <div class="login-meta"><span>Protected admin session</span><span>•</span><span>Automatic expiry</span></div>
+    </div>
+  </div>
+</div>
+
+<div id="entry" hidden aria-hidden="true">
+  <video id="entry-video" muted playsinline preload="none" poster="/assets/ema-entry-poster.jpg" data-src="/assets/ema-entry.mp4"></video>
+  <div class="entry-overlay"></div>
+  <div class="entry-progress"><span></span></div>
+  <div class="entry-caption"><span class="eyebrow">EMA CONTROL CENTER</span><strong>Secure operations. Complete visibility.</strong><span>Initializing administrator workspace</span></div>
+  </div>
+
+<div id="admin-shell" class="admin-shell" hidden>
+  <aside class="admin-sidebar">
+    <div>
+      <div class="brand-lockup sidebar-brand"><img src="/assets/logo.png" alt="EMA" onerror="this.src='/favicon.ico'"><div><strong>EMA</strong><span>ADMIN CONTROL CENTER</span></div></div>
+      <nav class="admin-nav" aria-label="Admin navigation">
+        <button data-view="overview" class="active"><i data-lucide="layout-dashboard"></i><span>Overview</span><kbd>1</kbd></button>
+        <button data-view="users"><i data-lucide="users"></i><span>Users & accounts</span><kbd>2</kbd></button>
+        <button data-view="activity"><i data-lucide="route"></i><span>Activity</span><kbd>3</kbd></button>
+        <button data-view="errors"><i data-lucide="triangle-alert"></i><span>Errors</span><kbd>4</kbd></button>
+        <button data-view="logs"><i data-lucide="terminal-square"></i><span>System logs</span><kbd>5</kbd></button>
+      </nav>
+    </div>
+    <div class="sidebar-footer">
+      <div class="session-pill"><span class="live-dot"></span><div><strong>Admin session</strong><span>Protected · active</span></div></div>
+      <div class="admin-profile"><div class="avatar" id="admin-avatar">A</div><div class="profile-copy"><strong id="admin-email">Administrator</strong><span id="admin-role">ADMIN ACCESS</span></div><button id="signout" class="icon-btn" title="Sign out"><i data-lucide="log-out"></i></button></div>
+    </div>
+  </aside>
+
+  <main class="admin-main">
+    <header class="topbar">
+      <div class="title-block"><div class="crumb">EMA / <strong id="view-label">Overview</strong></div><h1 id="page-title">Operations overview</h1><p id="page-subtitle">Live control plane for the EMA service.</p></div>
+      <div class="top-actions"><button id="refresh" class="ghost-btn"><i data-lucide="refresh-cw"></i><span>Refresh</span></button><button id="export-users" class="ghost-btn"><i data-lucide="download"></i><span>Export users</span></button><button id="admin-command" class="ghost-btn command-btn"><i data-lucide="command"></i><span>Command</span><kbd>Ctrl K</kbd></button></div>
+    </header>
+
+    <div class="mobile-tabs"><button data-view="overview" class="active">Overview</button><button data-view="users">Users</button><button data-view="activity">Activity</button><button data-view="errors">Errors</button><button data-view="logs">Logs</button></div>
+    <section id="view-overview" class="view active">
+      <div class="overview-hero glass-panel"><div><span class="eyebrow">Service pulse</span><h2>EMA is running as an autonomous operations layer.</h2><p>Monitor user activity, AI readiness, calendar processing and worker health from one place.</p></div><div class="hero-pulse"><div class="pulse-ring"><span id="hero-health-dot"></span></div><div><strong id="hero-health-title">Checking service</strong><span id="hero-health-copy">Loading live health telemetry…</span></div></div></div>
+      <div class="kpi-grid">
+        <article class="kpi glass-panel"><span class="kpi-icon indigo"><i data-lucide="users"></i></span><span class="eyebrow">Connected users</span><strong id="users-total">0</strong><small>Distinct Google identities</small></article>
+        <article class="kpi glass-panel"><span class="kpi-icon cyan"><i data-lucide="radio"></i></span><span class="eyebrow">Active now</span><strong id="active-total">0</strong><small>Sessions seen recently</small></article>
+        <article class="kpi glass-panel"><span class="kpi-icon emerald"><i data-lucide="activity"></i></span><span class="eyebrow">Monitoring</span><strong id="monitoring-total">0</strong><small>Accounts currently monitored</small></article>
+        <article class="kpi glass-panel"><span class="kpi-icon amber"><i data-lucide="key-round"></i></span><span class="eyebrow">Reauth required</span><strong id="reauth-total">0</strong><small>Accounts needing attention</small></article>
+        <article class="kpi glass-panel"><span class="kpi-icon violet"><i data-lucide="mail-check"></i></span><span class="eyebrow">Processed</span><strong id="processed-total">0</strong><small>Lifetime processing records</small></article>
+        <article class="kpi glass-panel"><span class="kpi-icon rose"><i data-lucide="bug"></i></span><span class="eyebrow">Errors</span><strong id="error-total">0</strong><small>Error-level log entries</small></article>
+      </div>
+
+      <div class="split-grid">
+        <section class="glass-panel panel-block"><div class="panel-header"><div><span class="eyebrow">AI layer</span><h3>Reasoning stack</h3><p>Primary model, verifier and fallback chain.</p></div><span id="ai-status-badge" class="status-badge info">CHECKING</span></div><div class="ai-stack"><div class="ai-cell"><span>Primary</span><strong id="ai-primary">—</strong><small>Main extraction model</small></div><div class="ai-cell"><span>Verifier</span><strong id="ai-verifier">—</strong><small id="ai-verifier-sub">Verification state</small></div><div class="ai-cell"><span>Fallbacks</span><strong id="ai-fallbacks">—</strong><small>Available model candidates</small></div></div></section>
+        <section class="glass-panel panel-block"><div class="panel-header"><div><span class="eyebrow">Live runtime</span><h3>Control plane</h3><p>Worker, inspector and process health.</p></div><span class="mini-live"><span class="live-dot"></span>LIVE</span></div><div class="runtime-list"><div><span>RAM</span><strong id="ram-value">—</strong><small id="ram-state">—</small></div><div><span>Worker</span><strong id="worker-value">—</strong><small id="worker-sub">—</small></div><div><span>Inspector</span><strong id="inspect-value">—</strong><small id="inspect-sub">—</small></div><div><span>Uptime</span><strong id="server-uptime">—</strong><small id="server-time">—</small></div></div></section>
+      </div>
+
+      <div class="control-grid"><section class="glass-panel panel-block"><div class="panel-header"><div><span class="eyebrow">Runtime controls</span><h3>Worker management</h3><p>Control the background email processing worker.</p></div></div><div class="button-row"><button id="worker-start" class="primary-btn"><i data-lucide="play"></i>Start worker</button><button id="worker-stop" class="danger-btn"><i data-lucide="square"></i>Stop worker</button><button id="trim" class="ghost-btn"><i data-lucide="memory-stick"></i>Trim memory</button></div></section><section class="glass-panel panel-block"><div class="panel-header"><div><span class="eyebrow">Historical inspection</span><h3>Inbox scan</h3><p>Process older unhandled emails across monitored accounts.</p></div></div><div class="button-row"><input id="inspect-count" class="field" type="number" min="10" max="40" value="20"><button id="inspect-start" class="primary-btn"><i data-lucide="scan-search"></i>Start scan</button><button id="inspect-stop" class="danger-btn"><i data-lucide="octagon"></i>Stop</button></div><small class="helper">Backend limit: 10–40 emails.</small></section></div>
+      <div class="glass-panel panel-block compact-note"><span class="note-icon"><i data-lucide="info"></i></span><div><strong>Privacy boundary</strong><p>Admin analytics expose operational metadata only. OAuth tokens and credential payloads are not rendered in the control center.</p></div></div>
+    </section>
+
+    <section id="view-users" class="view"><div class="view-head"><div><span class="eyebrow">Directory</span><h2>Users & accounts</h2><p id="users-count-note">—</p></div></div><section class="glass-panel panel-block"><div class="toolbar"><div class="search-field"><i data-lucide="search"></i><input id="user-search" placeholder="Search by email or name…"></div><select id="user-filter" class="field"><option value="all">All accounts</option><option value="monitoring">Monitoring</option><option value="paused">Paused</option><option value="reauth">Needs reauth</option></select></div><div class="table-wrap"><table><thead><tr><th>Account</th><th>Monitoring</th><th>Auth</th><th>Processed</th><th>Events</th><th>Filtered</th><th></th></tr></thead><tbody id="users-body"></tbody></table></div></section></section>
+    <section id="view-activity" class="view"><div class="view-head"><div><span class="eyebrow">Operations feed</span><h2>Processing activity</h2><p>Cross-account action metadata from EMA state storage.</p></div></div><section class="glass-panel panel-block"><div id="activity-log" class="log-list"></div></section></section>
+    <section id="view-errors" class="view"><div class="view-head"><div><span class="eyebrow">Diagnostics</span><h2>Errors & warnings</h2><p>Classified by subsystem and surfaced with plain-English context.</p></div></div><div id="error-grid" class="error-grid"></div><section class="glass-panel panel-block"><div class="panel-header"><div><span class="eyebrow">Recent</span><h3>Diagnostic feed</h3></div><button class="ghost-btn" id="refresh-errors"><i data-lucide="refresh-cw"></i>Refresh</button></div><div id="error-log" class="log-list"></div></section></section>
+    <section id="view-logs" class="view"><div class="view-head"><div><span class="eyebrow">Observability</span><h2>System logs</h2><p>Recent lines from the rotating EMA log.</p></div></div><section class="glass-panel panel-block"><div id="full-log" class="log-list log-dense"></div></section></section>
+  </main>
+</div>
+
+<div id="command-modal" class="command-modal" hidden><div class="command-card"><div class="command-search"><i data-lucide="command"></i><input id="command-search-input" placeholder="Search admin actions…"><kbd>ESC</kbd></div><div id="command-list" class="command-list"></div></div></div>
+<div id="user-modal" class="modal" aria-hidden="true"><div class="modal-box"><div class="modal-head"><div><span class="eyebrow">Account</span><strong id="modal-title">Details</strong></div><button id="modal-close" class="icon-btn"><i data-lucide="x"></i></button></div><div id="modal-body" class="modal-body"></div></div></div>
+<div id="toast" class="toast" hidden></div>
+<script src="/admin/admin.js"></script>
+</body></html>

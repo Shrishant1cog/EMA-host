@@ -18,6 +18,7 @@ import secrets
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 from contextlib import asynccontextmanager
 
@@ -369,6 +370,13 @@ async def lifespan(app_instance: FastAPI):
     else:
         KEEP_ALIVE_THREAD = None
 
+    try:
+        if _has_any_active_worker_scope():
+            start_worker_internal()
+            emit_user_log("INFO", "Restored background monitor from persisted user settings.")
+    except Exception as restore_err:
+        emit_user_log("WARN", f"Worker restore skipped: {restore_err}")
+
     yield
 
     KEEP_ALIVE_STOP_EVENT.set()
@@ -399,7 +407,7 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Accept", "Content-Type", "X-Session-ID", "X-Requested-With", "X-Request-ID", "X-EMA-Admin-CSRF"],
+    allow_headers=["Accept", "Content-Type", "X-Session-ID", "X-Requested-With", "X-Request-ID", "X-EMA-Admin-CSRF", "X-EMA-Admin-Session"],
 )
 
 
@@ -520,6 +528,9 @@ def get_dynamic_redirect_uri(request: Request) -> str:
     configured = getattr(config, "REDIRECT_URI", "").strip()
     if configured:
         return configured
+    frontend = (getattr(config, "FRONTEND_URL", "") or os.getenv("FRONTEND_URL", "")).strip().rstrip("/")
+    if frontend and not frontend.lower().startswith(("http://localhost", "http://127.0.0.1")):
+        return f"{frontend}/auth/callback"
     return "http://127.0.0.1:8000/auth/callback"
 
 
@@ -1100,7 +1111,7 @@ def _create_admin_session() -> Tuple[str, str, float]:
 
 
 def _get_admin_session(request: Request) -> Optional[Dict[str, Any]]:
-    raw = request.cookies.get("ema_admin_session", "").strip()
+    raw = (request.headers.get("x-ema-admin-session", "") or request.cookies.get("ema_admin_session", "")).strip()
     if not raw:
         return None
     key = _hash_admin_session(raw)
@@ -1116,7 +1127,7 @@ def _get_admin_session(request: Request) -> Optional[Dict[str, Any]]:
 
 
 def _revoke_admin_session(request: Request):
-    raw = request.cookies.get("ema_admin_session", "").strip()
+    raw = (request.headers.get("x-ema-admin-session", "") or request.cookies.get("ema_admin_session", "")).strip()
     if raw:
         with _ADMIN_SESSIONS_LOCK:
             _ADMIN_SESSIONS.pop(_hash_admin_session(raw), None)
@@ -1299,8 +1310,10 @@ def admin_auth_login(payload: AdminLoginPayload, request: Request):
         "role": "admin",
         "username": configured_username,
         "csrf_token": csrf,
+        "session_token": raw,
         "expires_at": datetime.fromtimestamp(expires).isoformat(),
     })
+    response.headers["Cache-Control"] = "no-store, max-age=0"
     response.set_cookie(
         "ema_admin_session",
         raw,
@@ -1375,6 +1388,9 @@ def _admin_log_tail(limit: int = 120) -> List[Dict[str, str]]:
 
 @app.get("/admin", include_in_schema=False)
 def admin_page():
+    frontend = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
+    if frontend and os.getenv("EMA_ENV", "").strip().lower() in {"production", "prod"}:
+        return RedirectResponse(url=f"{frontend}/admin/index.html", status_code=307)
     from fastapi.responses import FileResponse
     p = FRONTEND_DIR / "admin" / "index.html"
     if p.exists():
@@ -1750,19 +1766,21 @@ def logo():
 
 @app.get("/")
 def root(request: Request):
-    # Production Render service is API/auth only. Netlify owns the website.
-    if os.getenv("EMA_ENV", "development").strip().lower() in {"production", "prod"}:
-        return JSONResponse({"service": "EMA API", "status": "online", "frontend": getattr(config, "FRONTEND_URL", "")})
-
-    sid = get_request_session_id(request)
-    if sid and get_accounts_for_session(sid):
-        return RedirectResponse(url="/index.html", status_code=303)
-    return RedirectResponse(url="/login.html", status_code=303)
+    # Render is intentionally backend/API-only. Netlify owns all user-facing HTML.
+    return JSONResponse({
+        "service": "EMA API",
+        "status": "online",
+        "frontend": getattr(config, "FRONTEND_URL", ""),
+        "health": "/health",
+    })
 
 
 @app.get("/privacy", response_class=HTMLResponse)
 @app.get("/privacy.html", response_class=HTMLResponse)
-def serve_privacy_page():
+def serve_privacy_page(request: Request):
+    frontend = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
+    if frontend and os.getenv("EMA_ENV", "").strip().lower() in {"production", "prod"}:
+        return RedirectResponse(url=f"{frontend}/privacy.html", status_code=307)
     privacy_path = FRONTEND_DIR / "privacy.html"
     if not privacy_path.exists():
         raise HTTPException(status_code=404, detail="privacy.html not found")
@@ -1772,7 +1790,10 @@ def serve_privacy_page():
 
 @app.get("/terms", response_class=HTMLResponse)
 @app.get("/terms.html", response_class=HTMLResponse)
-def serve_terms_page():
+def serve_terms_page(request: Request):
+    frontend = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
+    if frontend and os.getenv("EMA_ENV", "").strip().lower() in {"production", "prod"}:
+        return RedirectResponse(url=f"{frontend}/terms.html", status_code=307)
     terms_path = FRONTEND_DIR / "terms.html"
     if not terms_path.exists():
         raise HTTPException(status_code=404, detail="terms.html not found")
@@ -1782,6 +1803,9 @@ def serve_terms_page():
 
 @app.get("/index.html", response_class=HTMLResponse)
 def serve_index_page(request: Request, session_id: Optional[str] = None):
+    frontend = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
+    if frontend and os.getenv("EMA_ENV", "").strip().lower() in {"production", "prod"}:
+        return RedirectResponse(url=f"{frontend}/index.html", status_code=307)
     sid = session_id or get_request_session_id(request) or ""
     if not sid or not get_accounts_for_session(sid):
         return RedirectResponse(url="/login.html", status_code=303)
@@ -1809,6 +1833,9 @@ def serve_index_page(request: Request, session_id: Optional[str] = None):
 
 @app.get("/login.html", response_class=HTMLResponse)
 def serve_login_page(request: Request):
+    frontend = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
+    if frontend and os.getenv("EMA_ENV", "").strip().lower() in {"production", "prod"}:
+        return RedirectResponse(url=f"{frontend}/login.html", status_code=307)
     sid = get_request_session_id(request)
     if sid and get_accounts_for_session(sid):
         return RedirectResponse(url=f"/index.html?session_id={sid}", status_code=303)
@@ -1844,14 +1871,36 @@ def build_oauth_flow(request: Request, state: Optional[str] = None, redirect_uri
 
 @app.post("/api/auth/launch-browser")
 def launch_browser_auth(request: Request, email: Optional[str] = None):
+    """Start Google OAuth in a browser-safe way.
+
+    The desktop app historically used this endpoint to open a local browser. In
+    production on Render, opening a browser from the server is meaningless, so
+    return a production auth URL and let the caller navigate there instead.
+    """
     existing_sid = get_request_session_id(request)
     sid = existing_sid or secrets.token_urlsafe(32)
-    hint_param = f"&email={email.strip().lower()}" if email else ""
-    chrome_target = f"http://127.0.0.1:8000/auth/login?session_id={sid}&browser=1{hint_param}"
-    open_in_chrome_or_default(chrome_target)
+    hint_param = f"&email={quote(email.strip().lower(), safe='')}" if email else ""
 
-    response = JSONResponse({"status": "opened", "session_id": sid, "auth_url": chrome_target})
-    response.set_cookie(key="assistant_session_id", value=sid, httponly=True, secure=_session_cookie_secure(), samesite="lax", path="/", max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600))
+    frontend = (getattr(config, "FRONTEND_URL", "") or os.getenv("FRONTEND_URL", "")).strip().rstrip("/")
+    is_production = os.getenv("EMA_ENV", "").strip().lower() in {"production", "prod"}
+    if is_production and frontend:
+        auth_url = f"{frontend}/auth/login?session_id={quote(sid, safe='')}&browser=1{hint_param}"
+    else:
+        auth_url = f"/auth/login?session_id={quote(sid, safe='')}&browser=1{hint_param}"
+        if request.url.hostname in {"localhost", "127.0.0.1"}:
+            auth_url = f"{request.base_url}auth/login?session_id={quote(sid, safe='')}&browser=1{hint_param}"
+
+    response = JSONResponse({"status": "ready", "session_id": sid, "auth_url": auth_url})
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.set_cookie(
+        key="assistant_session_id",
+        value=sid,
+        httponly=True,
+        secure=_session_cookie_secure(),
+        samesite="lax",
+        path="/",
+        max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600),
+    )
     return response
 
 
@@ -1955,23 +2004,10 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
         if session_id:
             set_auth_flow(session_id, status="failed", error=safe_err)
 
-        return HTMLResponse(
-            f"""
-            <!DOCTYPE html>
-            <html lang="en">
-            <head><meta charset="utf-8"><title>Authentication Failed</title><script src="https://cdn.tailwindcss.com"></script></head>
-            <body class="bg-[#060911] text-slate-100 min-h-screen flex items-center justify-center p-4 font-sans">
-              <div class="max-w-md w-full p-8 rounded-3xl bg-slate-900 border border-rose-500/30 text-center space-y-4 shadow-2xl">
-                <div class="w-12 h-12 rounded-full bg-rose-500/10 text-rose-400 flex items-center justify-center mx-auto text-xl font-bold">✕</div>
-                <h2 class="text-base font-bold text-white">Sign-in Unsuccessful</h2>
-                <p class="text-xs text-slate-400">{safe_err}</p>
-                <a href="/auth/login?browser=1" class="inline-block mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white rounded-xl transition">Try Again</a>
-              </div>
-            </body>
-            </html>
-            """,
-            status_code=400,
-        )
+        frontend_url = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
+        if frontend_url:
+            return RedirectResponse(url=f"{frontend_url}/login.html?auth_error={quote(safe_err, safe="")}", status_code=303)
+        return JSONResponse({"authenticated": False, "error": safe_err}, status_code=400)
 
     try:
         redirect_uri = flow_record.get("redirect_uri") if flow_record else get_dynamic_redirect_uri(request)
@@ -2068,23 +2104,22 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
               <p class="text-xs text-slate-400 mt-1">Authenticated <span class="text-blue-300 font-mono">{html.escape(clean_user_email)}</span></p>
             </div>
             <div class="p-3 bg-slate-950/80 border border-white/5 rounded-2xl text-xs text-emerald-400 font-medium">
-              You can now close this browser window and return to EMA.
+              Returning to EMA. Please keep this tab open while EMA loads.
             </div>
           </div>
           <script>
-            setTimeout(() => {{
-              try {{ window.close(); }} catch (e) {{}}
-              window.location.replace("/index.html");
-            }}, 2000);
+            setTimeout(() => {{ window.location.replace("/index.html"); }}, 800);
           </script>
         </body>
         </html>
         """
         frontend_url = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
-        if os.getenv("EMA_ENV", "development").strip().lower() in {"production", "prod"} and frontend_url:
-            response = RedirectResponse(url=f"{frontend_url}/index.html", status_code=303)
+        if frontend_url:
+            redirect_url = f"{frontend_url}/index.html#ema_session={quote(authenticated_session_id, safe="")}"
+            response = RedirectResponse(url=redirect_url, status_code=303)
+            response.headers["Cache-Control"] = "no-store, max-age=0"
         else:
-            response = HTMLResponse(content=html_content)
+            response = HTMLResponse(content=html_content, headers={"Cache-Control": "no-store, max-age=0"})
         response.set_cookie(key="assistant_session_id", value=authenticated_session_id, httponly=True, secure=_session_cookie_secure(), samesite="lax", path="/", max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600))
         return response
 
@@ -2093,18 +2128,24 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
         emit_user_log("ERROR", f"Account authentication failed: {err_msg}")
         if session_id:
             set_auth_flow(session_id, status="failed", error=err_msg)
+        frontend_url = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
+        if frontend_url:
+            msg = quote(str(err_msg), safe="")
+            response = RedirectResponse(url=f"{frontend_url}/login.html?auth_error={msg}", status_code=303)
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+            return response
         return HTMLResponse(
             f"""
             <!DOCTYPE html>
             <html lang="en">
-            <head><meta charset="utf-8"><title>Authentication Failed</title><script src="https://cdn.tailwindcss.com"></script></head>
-            <body class="bg-[#060911] text-slate-100 min-h-screen flex items-center justify-center p-4 font-sans">
-              <div class="max-w-md w-full p-8 rounded-3xl bg-slate-900 border border-rose-500/30 text-center space-y-4 shadow-2xl">
-                <div class="w-12 h-12 rounded-full bg-rose-500/10 text-rose-400 flex items-center justify-center mx-auto text-xl font-bold">✕</div>
-                <h2 class="text-base font-bold text-white">Token Exchange Failed</h2>
-                <p class="text-xs text-slate-400">{html.escape(err_msg)}</p>
-                <a href="/auth/login?browser=1" class="inline-block mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white rounded-xl transition">Try Again</a>
-              </div>
+            <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authentication Failed</title></head>
+            <body style="margin:0;background:#060911;color:#f1f5f9;min-height:100vh;display:grid;place-items:center;padding:24px;font-family:system-ui,sans-serif">
+              <main style="max-width:520px;width:100%;padding:32px;border-radius:24px;background:#0f172a;border:1px solid rgba(244,63,94,.3);text-align:center;box-sizing:border-box">
+                <div style="width:48px;height:48px;border-radius:50%;background:rgba(244,63,94,.1);color:#fb7185;display:grid;place-items:center;margin:0 auto 16px;font-size:22px;font-weight:800">✕</div>
+                <h1 style="margin:0;color:#fff;font-size:20px">Authentication Failed</h1>
+                <p style="color:#94a3b8;font-size:13px;line-height:1.6;overflow-wrap:anywhere">{html.escape(err_msg)}</p>
+                <a href="/auth/login?browser=1" style="display:inline-block;margin-top:10px;padding:11px 16px;border-radius:12px;background:#4f46e5;color:#fff;text-decoration:none;font-size:12px;font-weight:700">Try Again</a>
+              </main>
             </body>
             </html>
             """,
@@ -2696,5 +2737,5 @@ def stop_worker(request: Request):
     return {"status": "stopping", "user_enabled": False}
 
 
-if FRONTEND_DIR.exists():
+if FRONTEND_DIR.exists() and os.getenv("EMA_ENV", "").strip().lower() not in {"production", "prod"}:
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=False), name="frontend")

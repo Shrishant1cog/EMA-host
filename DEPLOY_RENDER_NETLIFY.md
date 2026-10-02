@@ -20,19 +20,19 @@ Render’s normal filesystem is ephemeral, so the SQLite database must be placed
 6. Attach a persistent disk mounted at `/var/data`.
 7. Add all production environment variables from `.env.production.example` in Render — never commit `.env`.
 8. Set `BACKEND_URL` and `RENDER_EXTERNAL_URL` to the Render URL.
-9. Set `FRONTEND_URL` and `REDIRECT_URI` to the Netlify URL.
+9. Set `FRONTEND_URL` to the Netlify URL and `REDIRECT_URI` to `https://ema-host.onrender.com/auth/callback` so Google returns directly to the backend callback, which then hands the authenticated session to Netlify.
 
 ## Netlify
 1. Create a Netlify site from the same Git repository.
 2. Publish directory: `frontend`. No build command is required for the static site.
-3. In `frontend/_redirects`, replace `REPLACE_WITH_RENDER_SERVICE.onrender.com` with the real Render hostname.
+3. Verify `frontend/_redirects` points to `https://ema-host.onrender.com` for `/api/*`, `/auth/*`, and `/health`.
 4. Redeploy.
 
 ## Google Cloud OAuth
-Add this exact redirect URI to the Google OAuth Web Application client:
-`https://emasys.netlify.app/auth/callback`
+Add this exact production redirect URI to the Google OAuth Web Application client:
+`https://ema-host.onrender.com/auth/callback`
 
-Do not use the Render callback URL when using the Netlify proxy architecture. The OAuth callback lands on Netlify, which rewrites it to Render. The response then sets the authenticated cookie on the Netlify origin.
+The browser starts OAuth through Netlify, Google returns directly to the Render backend callback, Render completes OAuth, then redirects the browser to `https://emasys.netlify.app/index.html#ema_session=...`. The fragment is consumed client-side, removed from the address bar, and the dashboard sends the server-side session identifier as `X-Session-ID` on proxied API requests. This avoids cross-origin cookie loss while keeping the website on Netlify.
 
 For a custom production domain, use the custom domain consistently for `FRONTEND_URL` and `REDIRECT_URI`, and add that exact origin/redirect URI in Google Cloud.
 
@@ -47,3 +47,7 @@ For a custom production domain, use the custom domain consistently for `FRONTEND
 
 ## Never put these in Git
 `GOOGLE_CLIENT_SECRET`, `GROQ_API_KEYS`, `TOKEN_ENCRYPTION_KEY`, `EMA_ADMIN_PASSWORD_HASH`, OAuth token files, and `.env` files.
+
+
+## Render wake / continuous operation
+The repository includes `.github/workflows/render-warmup.yml`, which requests `/health` every 10 minutes. GitHub documents a five-minute minimum for scheduled workflows and notes that scheduled runs can be delayed. This can keep a Render Free service warm while the workflow is active, but it is not a 24/7 uptime guarantee. Render Free services can still restart; an always-on paid service is the reliable option for a continuous background monitor.

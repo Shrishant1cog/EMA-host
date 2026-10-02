@@ -1,11 +1,9 @@
 {
-  "user_pageerrors_initial": [
-    "skip is not defined"
-  ],
+  "user_pageerrors_initial": [],
   "user_entry_video_state": {
-    "src": null,
+    "src": "assets/ema-entry.mp4",
     "dataSrc": "assets/ema-entry.mp4",
-    "played": false
+    "played": true
   },
   "user_fetch_call_count": 10,
   "user_email_call_count": 2,
@@ -23,9 +21,6 @@
     "src": "/assets/ema-entry.mp4",
     "played": true
   },
-  "status": "FAIL",
-  "failures": [
-    "user page error: skip is not defined",
-    "user entry video did not start after auth in browser harness"
-  ]
+  "status": "PASS",
+  "failures": []
 }

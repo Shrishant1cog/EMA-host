@@ -31,7 +31,6 @@ body { isolation: isolate; }
 }
 #ema-entry-progress span { box-shadow:0 0 14px rgba(34,211,238,.42); }
 #ema-entry-status { text-shadow:0 2px 18px rgba(0,0,0,.65); }
-#ema-entry-skip { z-index:4; }
 
 /* Global app intro after auth */
 html.auth-verified .ambient-mesh { opacity:1; }
@@ -66,7 +65,7 @@ html.auth-verified .ambient-mesh { opacity:1; }
 .btn-action, button { -webkit-user-select:none; user-select:none; }
 .btn-action:focus-visible, .nav-btn:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline:2px solid rgba(129,140,248,.85); outline-offset:2px;
-} }
+}
 
 /* KPI motion */
 #tab-dashboard [id^="kpi-"] { font-variant-numeric:tabular-nums; }

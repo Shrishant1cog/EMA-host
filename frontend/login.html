@@ -9,8 +9,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <script defer src="https://cdn.tailwindcss.com"></script>
-  <script defer src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
 
   <script>
     // Universal Fetch Interceptor: Works on Netlify static hosting without backend script injection
@@ -28,7 +28,8 @@
       };
     })();
 
-    tailwind.config = {
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = {
       darkMode: 'class',
       theme: {
         extend: {
@@ -58,7 +59,6 @@
         #060913;
     }
     .aurora-blob { display:none; }
-    }
 
     .glass-card {
       background: rgba(13, 18, 30, 0.72);
@@ -143,6 +143,15 @@
         transition-duration: 0.01ms !important;
       }
     }
+  </style>
+
+  <style id="ema-login-responsive">
+    html,body{min-width:0;width:100%;}
+    body{overflow:auto!important;min-height:100svh;padding-top:max(16px,env(safe-area-inset-top));padding-bottom:max(16px,env(safe-area-inset-bottom));}
+    .glass-card{width:min(100%,520px);}
+    @media(max-width:640px){body{align-items:flex-start!important;padding:16px!important}.card-spring-appear{margin:0 auto;padding:22px!important;border-radius:24px!important}.card-spring-appear h1{font-size:1.35rem}.card-spring-appear button{min-height:46px}}
+    @media(max-width:380px){.card-spring-appear{padding:18px!important}.card-spring-appear .w-20.h-20{width:64px!important;height:64px!important}}
+    @media(prefers-reduced-motion:reduce){.card-spring-appear{animation:none!important}}
   </style>
 </head>
 <body class="text-slate-200 min-h-screen font-sans antialiased relative overflow-hidden flex items-center justify-center p-4 sm:p-6 selection:bg-indigo-500/30 selection:text-indigo-200">
@@ -230,59 +239,37 @@
   </div>
 
   <script>
-    // Automatically uses localhost in local development or your live Render backend in production
-    const BACKEND_URL = window.__EMA_BACKEND_URL__ ||
-      ((window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-        ? "http://127.0.0.1:8000"
-        : window.location.origin);
-
-    window.lucide?.createIcons?.();
-    window.addEventListener('load', () => window.lucide?.createIcons?.(), { once: true });
-
+    const IS_LOCAL_EMA = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    const BACKEND_URL = IS_LOCAL_EMA ? "http://127.0.0.1:8000" : "";
+    const SESSION_KEY = "ema_session_id";
+    const getSessionId = () => { try { return sessionStorage.getItem(SESSION_KEY) || ""; } catch (_) { return ""; } };
     async function checkExistingAuth() {
       const btn = document.getElementById('btn-google-login');
       try {
-        const res = await fetch(`${BACKEND_URL}/api/user`, { credentials: 'include' });
-        const data = await res.json().catch(() => ({}));
-
-        if (res.ok && data.authenticated) {
-          window.location.replace("index.html");
-          return true;
-        }
-      } catch (err) {
-        // Keep login usable when the status probe is temporarily unavailable.
-      }
-
-      if (btn) btn.classList.remove('opacity-40', 'pointer-events-none');
+        const headers = {}; const sid = getSessionId(); if (sid) headers['X-Session-ID'] = sid;
+        const res = await fetch(`${BACKEND_URL}/api/user`, { credentials:'include', headers, cache:'no-store' });
+        const data = await res.json().catch(()=>({}));
+        if (res.ok && data.authenticated) { window.location.replace('/index.html'); return true; }
+      } catch (_) {}
+      if (btn) { btn.disabled=false; btn.classList.remove('opacity-40','pointer-events-none'); }
       return false;
     }
+    window.lucide?.createIcons?.();
     checkExistingAuth();
-
     const params = new URLSearchParams(window.location.search);
     const err = params.get('auth_error');
     if (err) {
-      let message = err;
-      try { message = decodeURIComponent(err); } catch (_) {}
-      document.getElementById('auth-error-msg').innerText = message;
-      document.getElementById('auth-error-box').classList.remove('hidden');
+      let message=err; try { message=decodeURIComponent(err); } catch (_) {}
+      const box=document.getElementById('auth-error-box'); const msg=document.getElementById('auth-error-msg');
+      if(msg) msg.innerText=message; if(box) box.classList.remove('hidden'); history.replaceState(null,'','/login.html');
     }
-
-    let authRedirectStarted = false;
-
+    let authRedirectStarted=false;
     function startGoogleAuth(event) {
-      if (event) event.preventDefault();
-      if (authRedirectStarted) return;
-
-      authRedirectStarted = true;
-      const btn = document.getElementById('btn-google-login');
-      const label = document.getElementById('btn-login-text');
-
-      if (btn) {
-        btn.disabled = true;
-        btn.classList.add('opacity-40', 'pointer-events-none');
-      }
-      if (label) label.innerText = "Connecting to Google...";
-
+      event?.preventDefault(); if(authRedirectStarted)return; authRedirectStarted=true;
+      const btn=document.getElementById('btn-google-login'); const label=document.getElementById('btn-login-text');
+      if(btn){btn.disabled=true;btn.classList.add('opacity-40','pointer-events-none');}
+      if(label) label.innerText='Connecting to Google...';
+      // Netlify proxies /auth/* to Render.
       window.location.assign(`${BACKEND_URL}/auth/login?browser=1`);
     }
   </script>

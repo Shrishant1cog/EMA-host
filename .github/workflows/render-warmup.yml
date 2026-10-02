@@ -1,0 +1,17 @@
+name: Keep EMA Render Warm
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 * * * *"
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping EMA health endpoint
+        run: |
+          curl --fail --silent --show-error --max-time 20 \
+            -H "Cache-Control: no-cache" \
+            https://ema-host.onrender.com/health

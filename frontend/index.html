@@ -17,8 +17,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-  <script defer src="https://cdn.tailwindcss.com"></script>
-  <script defer src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
 
   <script>
     // EMA adaptive runtime: uses browser-exposed viewport/device hints only.
@@ -81,49 +81,43 @@
       }
     })();
 
-    const BACKEND_URL = window.__EMA_BACKEND_URL__ ||
-      ((window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-        ? "http://127.0.0.1:8000"
-        : window.location.origin);
-
-    // Auth/session bootstrap. Production web sessions are HttpOnly cookies.
-    // Localhost keeps the same cookie flow; no session token is stored in localStorage.
-    (function () {
+    const IS_LOCAL_EMA = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    const BACKEND_URL = IS_LOCAL_EMA ? "http://127.0.0.1:8000" : "";
+    const SESSION_KEY = "ema_session_id";
+    (function bootstrapSession(){
+      try {
+        const hash = location.hash.startsWith('#') ? location.hash.slice(1) : '';
+        const fragment = new URLSearchParams(hash);
+        const handedOff = fragment.get('ema_session');
+        if (handedOff) { sessionStorage.setItem(SESSION_KEY, handedOff); history.replaceState(null,'',location.pathname+location.search); }
+      } catch (_) {}
+    })();
+    const getSessionId = () => { try { return sessionStorage.getItem(SESSION_KEY) || ""; } catch (_) { return ""; } };
+    const clearSessionId = () => { try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {} };
+    (function(){
       const originalFetch = window.fetch.bind(window);
-      let authRedirecting = false;
-
-      window.fetch = async function (input, init = {}) {
-        const headers = new Headers(init.headers || {});
-        const nextInit = { ...init, headers, credentials: "include" };
-        const response = await originalFetch(input, nextInit);
-        if (response.status === 401 && window.__emaAuthVerified && !authRedirecting) {
-          authRedirecting = true;
-          window.__emaAuthVerified = false;
-          window.location.replace("/login.html");
-        }
+      let authRedirecting=false;
+      window.fetch = async function(input, init={}){
+        const headers=new Headers(init.headers||{}); const sid=getSessionId();
+        if(sid&&!headers.has('X-Session-ID')) headers.set('X-Session-ID',sid);
+        const response=await originalFetch(input,{...init,headers,credentials:'include'});
+        if(response.status===401&&window.__emaAuthVerified&&!authRedirecting){authRedirecting=true;window.__emaAuthVerified=false;clearSessionId();window.location.replace('/login.html');}
         return response;
       };
-
-      window.__emaAuthPromise = (async function guardDashboard() {
-        try {
-          const res = await originalFetch(`${BACKEND_URL}/api/user`, { credentials: "include" });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok || !data.authenticated) throw new Error("Not authenticated");
-
-          document.documentElement.classList.add("auth-verified");
-          document.body.classList.remove("auth-pending");
-          document.body.classList.add("auth-ready");
-          window.__emaAuthVerified = true;
-          window.dispatchEvent(new Event("ema:auth-verified"));
-          return true;
-        } catch (err) {
-          window.location.replace("/login.html");
-          return false;
-        }
+      window.__emaAuthPromise=(async function(){
+        try{
+          const headers={}; const sid=getSessionId(); if(sid) headers['X-Session-ID']=sid;
+          const res=await originalFetch(`${BACKEND_URL}/api/user`,{credentials:'include',headers,cache:'no-store'});
+          const data=await res.json().catch(()=>({}));
+          if(!res.ok||!data.authenticated) throw new Error('Not authenticated');
+          document.documentElement.classList.add('auth-verified'); document.body.classList.remove('auth-pending'); document.body.classList.add('auth-ready');
+          window.__emaAuthVerified=true; window.dispatchEvent(new Event('ema:auth-verified')); return true;
+        }catch(_){clearSessionId();window.location.replace('/login.html');return false;}
       })();
     })();
 
-    tailwind.config = {
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = {
       darkMode: 'class',
       theme: {
         extend: {
@@ -425,7 +419,7 @@
 
     @media (hover: none) {
       .glass-card:hover,
-      .btn-action:hover:not(:disabled),
+      .btn-action:hover:not(:disabled) { transform:none !important; filter:none !important; }
     }
 
     @media (orientation: landscape) and (max-height: 600px) {
@@ -490,6 +484,81 @@
 
   </style>
   <link rel="stylesheet" href="/ux-pro.css">
+
+  <style id="ema-production-responsive">
+    html,body{min-width:0;max-width:100%;}
+    html{overflow-x:hidden;}
+    body{margin:0;overflow:hidden;overflow-wrap:normal;}
+    #app-main-scroll{width:100%;min-width:0;}
+    #app-main-scroll>main{width:100%;min-width:0;}
+    img,svg,video,canvas{max-width:100%;}
+    button,a,input,select,textarea{touch-action:manipulation;}
+    @media(min-width:768px) and (max-width:1100px){
+      body>aside{width:210px!important;min-width:210px!important;padding:14px!important}
+      #app-main-scroll>header{flex-wrap:wrap;align-items:flex-start!important;padding-left:22px!important;padding-right:22px!important}
+      #app-main-scroll>header>div:first-child{flex:1 1 100%;max-width:100%}
+      #app-main-scroll>header>div:last-child{width:100%;justify-content:flex-end;flex-wrap:wrap!important;gap:8px!important}
+      #app-main-scroll>main{padding-left:22px!important;padding-right:22px!important}
+      #tab-dashboard>div:first-child{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+    }
+    @media(max-width:767px){
+      body{display:flex;flex-direction:column;width:100%;max-width:100%;margin:0;height:100dvh;min-height:100svh;}
+      #app-main-scroll{height:calc(100dvh - 57px)!important;flex:1 1 auto;overflow-y:auto!important;overflow-x:hidden!important;}
+      body>header.md\:hidden{flex:0 0 57px;width:100%;}
+      #app-main-scroll>header{position:sticky;top:0;z-index:30;display:flex;flex-direction:column;align-items:stretch!important;padding:13px 14px!important;gap:10px!important;}
+      #app-main-scroll>header>div:first-child{width:100%;}
+      #app-main-scroll>header h2{font-size:1.08rem!important;line-height:1.25!important;}
+      #app-main-scroll>header>div:first-child>p{font-size:.7rem!important;line-height:1.45!important;}
+      #app-main-scroll>header>div:last-child{width:100%;display:flex;justify-content:flex-end;flex-wrap:wrap!important;gap:7px!important;}
+      #app-main-scroll>header>div:last-child>button{min-height:42px;}
+      #user-menu-wrapper{max-width:100%;}
+      #user-menu-btn{min-width:0!important;width:auto!important;max-width:100%!important;}
+      #header-user-name{max-width:32vw!important;}
+      #user-dropdown-menu{position:fixed!important;left:12px!important;right:12px!important;top:64px!important;width:auto!important;max-width:none!important;max-height:calc(100dvh - 80px);overflow:auto;}
+      #app-main-scroll>main{padding:14px!important;max-width:none!important;}
+      #tab-dashboard{gap:16px!important;}
+      #tab-dashboard>.grid.grid-cols-2:first-child{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important;}
+      #tab-dashboard>.grid.grid-cols-2:first-child .glass-card{padding:12px!important;gap:10px!important;min-height:86px;}
+      #tab-dashboard>.grid.grid-cols-2:first-child .glass-card>div:first-child{width:38px!important;height:38px!important;border-radius:12px!important;}
+      #tab-dashboard>.grid.grid-cols-2:first-child h3{font-size:1.25rem!important;}
+      #tab-dashboard>.grid.grid-cols-2:first-child p{white-space:normal!important;font-size:9px!important;line-height:1.25!important;}
+      #tab-dashboard>.grid.grid-cols-1{grid-template-columns:1fr!important;gap:12px!important;min-height:0!important;}
+      #tab-dashboard>.grid.grid-cols-1 .glass-card{min-height:180px;padding:14px!important;}
+      #recent-activity-list,#upcoming-events-list{max-height:38dvh!important;}
+      #ema-pro-welcome{padding:16px!important;border-radius:22px!important;}
+      #ema-pro-welcome>div{gap:14px!important;}
+      #ema-pro-welcome h3{font-size:1rem!important;line-height:1.3!important;}
+      #ema-pro-welcome p{font-size:10px!important;line-height:1.5!important;}
+      #ema-pro-welcome>div>div:last-child{width:100%;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px!important;}
+      #ema-pro-welcome button{width:100%!important;min-height:44px;}
+      #tab-accounts .glass-card,#tab-calendar .glass-card,#tab-drive .glass-card,#tab-emails .glass-card,#tab-settings .glass-card{padding:14px!important;border-radius:22px!important;}
+      #accounts-container{grid-template-columns:1fr!important;}
+      #setting-target-calendar-select{width:100%;min-height:42px;}
+      #tab-calendar .glass-card>div:first-child{flex-direction:column;align-items:stretch!important;}
+      #tab-calendar .glass-card>div:first-child button{width:100%;min-height:44px;justify-content:center;}
+      #calendar-schedule-container{max-height:none!important;overflow:visible!important;}
+      #tab-drive .grid{grid-template-columns:1fr!important;}
+      #btn-inspect-toggle,#btn-save-timing,#btn-save-prompt{min-height:44px;}
+      #email-search-input{min-height:42px;}
+      #emails-container{max-height:none!important;min-height:220px;}
+      #tab-settings .grid.grid-cols-2{grid-template-columns:1fr!important;}
+      .quick-palette-backdrop{padding-top:64px!important;}
+      .quick-palette{width:calc(100vw - 20px)!important;max-height:82dvh;}
+      .quick-palette-list{max-height:60dvh!important;}
+      #event-detail-card,#profile-modal-card,#signout-modal-card{max-height:calc(100dvh - 24px)!important;overflow-y:auto!important;width:calc(100vw - 24px)!important;margin:12px!important;padding:16px!important;}
+      #event-detail-modal,#profile-modal,#signout-modal{align-items:center!important;padding:0!important;}
+      #mobile-drawer{padding:max(18px,env(safe-area-inset-top)) 18px max(18px,env(safe-area-inset-bottom)) 18px!important;overflow-y:auto;}
+      #mobile-drawer nav button{min-height:46px;}
+    }
+    @media(max-width:480px){
+      #tab-dashboard>.grid.grid-cols-2:first-child{grid-template-columns:1fr!important;}
+      #tab-dashboard>.grid.grid-cols-2:first-child .glass-card{min-height:78px;}
+      #ema-pro-welcome>div>div:last-child{grid-template-columns:1fr!important;}
+      #header-user-name{max-width:26vw!important;}
+      #tab-emails .flex.items-center.gap-2.overflow-x-auto{scrollbar-width:none;}
+    }
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important;}}
+  </style>
 </head>
 <body class="font-sans antialiased flex flex-col md:flex-row relative auth-pending">
 

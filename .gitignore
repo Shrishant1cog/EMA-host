@@ -27,6 +27,7 @@ Output/
 .DS_Store
 Thumbs.db
 .vscode/
+.netlify/
 .idea/
 !.env.example
 !.env.*.example

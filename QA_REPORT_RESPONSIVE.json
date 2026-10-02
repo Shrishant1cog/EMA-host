@@ -1,0 +1,54 @@
+{
+  "status": "PASS",
+  "checks": {
+    "user_320x568_dims": {
+      "cw": 320,
+      "sw": 320,
+      "bw": 320
+    },
+    "user_320x568_overflowing_controls": [],
+    "user_360x800_dims": {
+      "cw": 360,
+      "sw": 360,
+      "bw": 360
+    },
+    "user_360x800_overflowing_controls": [],
+    "user_390x844_dims": {
+      "cw": 390,
+      "sw": 390,
+      "bw": 390
+    },
+    "user_390x844_overflowing_controls": [],
+    "user_430x932_dims": {
+      "cw": 430,
+      "sw": 430,
+      "bw": 430
+    },
+    "user_430x932_overflowing_controls": [],
+    "user_768x1024_dims": {
+      "cw": 768,
+      "sw": 768,
+      "bw": 768
+    },
+    "user_768x1024_overflowing_controls": [],
+    "user_1024x768_dims": {
+      "cw": 1024,
+      "sw": 1024,
+      "bw": 1024
+    },
+    "user_1024x768_overflowing_controls": [],
+    "user_1440x900_dims": {
+      "cw": 1440,
+      "sw": 1440,
+      "bw": 1440
+    },
+    "user_1440x900_overflowing_controls": [],
+    "user_1920x1080_dims": {
+      "cw": 1920,
+      "sw": 1920,
+      "bw": 1920
+    },
+    "user_1920x1080_overflowing_controls": []
+  },
+  "failures": []
+}

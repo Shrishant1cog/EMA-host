@@ -49,6 +49,8 @@ The QA cycle was iterative: source/performance audit → fixes → static QA →
 | `python tools/ux_contract_test.py` | PASS |
 | `python phase1_backend_test.py` | PASS |
 | `python tools/frontend_smoke_test.py` | PASS |
+| `python tools/responsive_qa.py` | PASS |
+| `python tools/interaction_qa.py` | PASS |
 | `python phase1_backend_selftest.py` | PASS |
 | Python compile checks | PASS |
 | JavaScript syntax checks | PASS |
@@ -61,6 +63,15 @@ The QA cycle was iterative: source/performance audit → fixes → static QA →
 - Login page: no page errors.
 - Admin page: no page errors; entry video starts only after successful mocked admin authentication.
 - User email tab remained within the expected cache/race guard call count.
+
+
+### Responsive / interaction QA
+- Tested user dashboard at 320×568, 360×800, 390×844, 430×932, 768×1024, 1024×768, 1440×900, and 1920×1080.
+- No horizontal document overflow was detected at those viewports.
+- The mobile navigation drawer opened and closed correctly in the interaction harness.
+- The user account dropdown stayed inside the viewport on phone/tablet/desktop widths.
+- Login and admin interaction harnesses reported no JavaScript/page errors.
+- Admin entry video remained auth-gated and started after successful mocked authentication.
 
 ## Entry video metadata
 

@@ -1,5 +1,5 @@
-# EMA production proxy: Netlify serves the frontend; Render serves API/auth.
-/api/*   https://ema-host.onrender.com/api/:splat   200
+# EMA production routing
 /auth/*  https://ema-host.onrender.com/auth/:splat  200
+/api/*   https://ema-host.onrender.com/api/:splat   200
 /health  https://ema-host.onrender.com/health       200
-/admin   /admin/index.html                                             200!
+/admin   /admin/index.html                          200!

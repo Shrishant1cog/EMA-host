@@ -1,0 +1,44 @@
+{
+  "status": "PASS",
+  "results": {
+    "user_360": {
+      "dropdown": {
+        "l": 12,
+        "r": 348,
+        "w": 336
+      },
+      "errors": []
+    },
+    "user_768": {
+      "dropdown": {
+        "l": 22,
+        "r": 355.03125,
+        "w": 333.03125
+      },
+      "errors": []
+    },
+    "user_1440": {
+      "dropdown": {
+        "l": 0,
+        "r": 1440,
+        "w": 1440
+      },
+      "errors": []
+    },
+    "login_mobile_button": {
+      "x": 43.7054443359375,
+      "y": 288.0259704589844,
+      "width": 146.56396484375,
+      "height": 151.54437255859375
+    },
+    "admin_360": {
+      "entry_shown": true,
+      "errors": []
+    },
+    "admin_1440": {
+      "entry_shown": true,
+      "errors": []
+    }
+  },
+  "failures": []
+}

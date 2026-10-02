@@ -122,7 +122,19 @@ def run():
         email_calls=[c for c in calls if '/api/emails?' in c['url']]
         RESULTS['user_fetch_call_count']=len(calls); RESULTS['user_email_call_count']=len(email_calls)
         if len(email_calls)>2: FAILURES.append(f'user email tab made {len(email_calls)} calls; cache/race guard failed')
-        page.close()
+        # Persistent-login contract: session ID is stored in localStorage, not sessionStorage.
+        idx_source = (ROOT/'frontend/index.html').read_text(encoding='utf-8')
+        login_source = (ROOT/'frontend/login.html').read_text(encoding='utf-8')
+        RESULTS['persistent_session_contract'] = {
+            'index_uses_localStorage': "localStorage.getItem(SESSION_KEY)" in idx_source and "localStorage.setItem(SESSION_KEY" in idx_source,
+            'login_uses_localStorage': "localStorage.getItem(SESSION_KEY)" in login_source,
+            'index_uses_sessionStorage_for_session': 'sessionStorage.getItem(SESSION_KEY)' in idx_source or 'sessionStorage.setItem(SESSION_KEY' in idx_source,
+            'login_uses_sessionStorage_for_session': 'sessionStorage.getItem(SESSION_KEY)' in login_source,
+        }
+        if not RESULTS['persistent_session_contract']['index_uses_localStorage']: FAILURES.append('dashboard session ID is not persisted in localStorage')
+        if not RESULTS['persistent_session_contract']['login_uses_localStorage']: FAILURES.append('login page does not read persisted session ID from localStorage')
+        if RESULTS['persistent_session_contract']['index_uses_sessionStorage_for_session'] or RESULTS['persistent_session_contract']['login_uses_sessionStorage_for_session']:
+            FAILURES.append('session ID still uses sessionStorage')
 
         # User unauthenticated static behavior: script contract + no video source before auth.
         unauth_page = browser.new_page()

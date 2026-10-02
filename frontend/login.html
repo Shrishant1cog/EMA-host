@@ -16,13 +16,13 @@
     // Universal Fetch Interceptor: Works on Netlify static hosting without backend script injection
     (function() {
       const urlParams = new URLSearchParams(window.location.search);
-      // Production web sessions are cookie-based. Query-string session IDs are legacy-only.
+      // Production web sessions use a persisted opaque session ID in localStorage plus the server-side session record. The browser cookie is a convenience fallback.
 
       const _origFetch = window.fetch;
       window.fetch = function(input, init) {
         init = init || {};
         init.headers = init.headers || {};
-        // HttpOnly session cookie is the source of truth.
+        // Persisted localStorage session ID is the source of truth for the Netlify-hosted SPA; the backend validates it server-side.
         init.credentials = "include";
         return _origFetch(input, init);
       };
@@ -242,7 +242,7 @@
     const IS_LOCAL_EMA = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
     const BACKEND_URL = IS_LOCAL_EMA ? "http://127.0.0.1:8000" : "";
     const SESSION_KEY = "ema_session_id";
-    const getSessionId = () => { try { return sessionStorage.getItem(SESSION_KEY) || ""; } catch (_) { return ""; } };
+    const getSessionId = () => { try { return localStorage.getItem(SESSION_KEY) || ""; } catch (_) { return ""; } };
     async function checkExistingAuth() {
       const btn = document.getElementById('btn-google-login');
       try {

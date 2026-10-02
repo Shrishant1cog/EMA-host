@@ -89,11 +89,11 @@
         const hash = location.hash.startsWith('#') ? location.hash.slice(1) : '';
         const fragment = new URLSearchParams(hash);
         const handedOff = fragment.get('ema_session');
-        if (handedOff) { sessionStorage.setItem(SESSION_KEY, handedOff); history.replaceState(null,'',location.pathname+location.search); }
+        if (handedOff) { localStorage.setItem(SESSION_KEY, handedOff); history.replaceState(null,'',location.pathname+location.search); }
       } catch (_) {}
     })();
-    const getSessionId = () => { try { return sessionStorage.getItem(SESSION_KEY) || ""; } catch (_) { return ""; } };
-    const clearSessionId = () => { try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {} };
+    const getSessionId = () => { try { return localStorage.getItem(SESSION_KEY) || ""; } catch (_) { return ""; } };
+    const clearSessionId = () => { try { localStorage.removeItem(SESSION_KEY); } catch (_) {} };
     (function(){
       const originalFetch = window.fetch.bind(window);
       let authRedirecting=false;
@@ -2254,6 +2254,7 @@
       } catch (err) {
         console.warn("Logout request failed:", err);
       } finally {
+        clearSessionId();
         window.location.replace("/login.html");
       }
     }

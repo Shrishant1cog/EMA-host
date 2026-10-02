@@ -20,7 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DEFAULT_DB_PATH = getattr(config, "DB_PATH", BASE_DIR / "assistant_v2.db")
 _INIT_LOCK = threading.RLock()
 _INITIALIZED_DBS: set[str] = set()
-_SESSION_TTL_SECONDS = int(getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600))
+_SESSION_TTL_SECONDS = int(getattr(config, "SESSION_TTL_SECONDS", 30 * 24 * 3600))
 _SESSION_GRACE_MAX = 30 * 24 * 3600
 _SESSION_TOUCH_CACHE: Dict[str, datetime] = {}
 _SESSION_TOUCH_LOCK = threading.RLock()
@@ -200,7 +200,14 @@ def touch_user_session(session_id: str, db_path: Path = DEFAULT_DB_PATH) -> bool
 
     conn = get_db_connection(db_path)
     try:
-        conn.execute("UPDATE user_sessions SET last_seen = ? WHERE session_hash = ?", (now.isoformat(), key))
+        # Sliding expiration: active users keep their sign-in across browser restarts
+        # while the configured inactivity/session lifetime is continuously renewed.
+        ttl = max(900, min(int(_SESSION_TTL_SECONDS), _SESSION_GRACE_MAX))
+        expires = now + timedelta(seconds=ttl)
+        conn.execute(
+            "UPDATE user_sessions SET last_seen = ?, expires_at = ? WHERE session_hash = ?",
+            (now.isoformat(), expires.isoformat(), key),
+        )
         conn.commit()
         return True
     finally:

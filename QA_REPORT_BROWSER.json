@@ -7,6 +7,12 @@
   },
   "user_fetch_call_count": 10,
   "user_email_call_count": 2,
+  "persistent_session_contract": {
+    "index_uses_localStorage": true,
+    "login_uses_localStorage": true,
+    "index_uses_sessionStorage_for_session": false,
+    "login_uses_sessionStorage_for_session": false
+  },
   "user_unauth_video_markup": {
     "src": null,
     "dataSrc": "assets/ema-entry.mp4"

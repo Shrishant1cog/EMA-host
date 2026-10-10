@@ -847,9 +847,11 @@ def background_worker_loop():
                     current_epoch = int(time.time())
 
                     if not last_epoch_str or last_epoch_str == "0":
-                        # First scan is bounded to the last day, but do not advance the
-                        # cursor until the whole batch succeeds; failed messages stay unread.
+                        # Establish a stable backfill floor for the initial 24-hour scan.
+                        # This is not the end cursor: the cursor only advances after the
+                        # query is drained and a short, successful page is returned.
                         epoch_cutoff = current_epoch - (24 * 3600)
+                        set_drive_setting(acc_email, "last_sync_epoch", str(epoch_cutoff))
                     else:
                         try:
                             epoch_cutoff = int(last_epoch_str)

@@ -19,6 +19,11 @@ checks={
  'memory_telemetry':'psutil.Process(os.getpid()).memory_info().rss' in main,
  'cors_narrowed':'allow_methods=["GET", "POST", "OPTIONS"]' in main,
  'production_oauth_guard':'OAUTHLIB_INSECURE_TRANSPORT' in main,
+ 'oauth_fails_closed':'user_{session_id[:6]}' not in main and 'ui.get("verified_email") is not True' in main,
+ 'no_destructive_history_drop':'DROP TABLE IF EXISTS email_actions' not in (ROOT/'backend/utils/state_tracker.py').read_text(encoding='utf-8'),
+ 'worker_start_race_guard':'_WORKER_START_LOCK' in main and 'WORKER_THREAD.is_alive()' in main,
+ 'account_processing_lock':'_EMAIL_PROCESS_LOCKS_GUARD' in main and 'def process_single_email(' in main,
+ 'calendar_update_preserves_http_errors':'except HTTPException:' in main[main.find('def update_calendar_event'):main.find('class EventDeletePayload')],
 }
 for k,v in checks.items():
     if not v: fail.append(k)

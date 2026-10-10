@@ -817,6 +817,8 @@ def background_worker_loop():
 
     IDLE_SLEEP = 60
     ACTIVE_SLEEP = 15
+    EMAIL_BATCH_SIZE = 5
+    SYNC_CURSOR_OVERLAP_SECONDS = 120
 
     while not WORKER_STATE["stop_event"].is_set():
         try:
@@ -855,8 +857,13 @@ def background_worker_loop():
                             epoch_cutoff = current_epoch - 3600
 
                     gmail_service, calendar_service = get_google_services_for_account(acc_email)
-                    query = f"is:unread label:INBOX -label:spam -label:trash after:{epoch_cutoff}"
-                    msg_ids = get_unprocessed_message_ids(gmail_service, query=query, max_results=5)
+                    # Use a short look-back window to tolerate provider indexing delays;
+                    # already-processed IDs are deduplicated below.
+                    query_cutoff = max(0, epoch_cutoff - SYNC_CURSOR_OVERLAP_SECONDS)
+                    query = f"is:unread label:INBOX -label:spam -label:trash after:{query_cutoff}"
+                    msg_ids = get_unprocessed_message_ids(
+                        gmail_service, query=query, max_results=EMAIL_BATCH_SIZE, raise_errors=True
+                    )
 
                     if msg_ids:
                         total_new_emails += len(msg_ids)
@@ -867,14 +874,29 @@ def background_worker_loop():
                         if WORKER_STATE["stop_event"].is_set():
                             break
                         if is_email_processed_drive(acc_email, mid):
+                            # A prior successful processing may have failed only to mark the
+                            # message read. Retry that label cleanup so stale processed messages
+                            # don't permanently occupy every page of the unread query.
+                            try:
+                                gmail_service.users().messages().modify(
+                                    userId="me", id=str(mid), body={"removeLabelIds": ["UNREAD"]}
+                                ).execute()
+                            except Exception as cleanup_err:
+                                emit_user_log("WARN", f"Could not clear UNREAD from already-processed message {mid}: {cleanup_err}")
+                                batch_failed = True
                             continue
 
                         if not process_single_email(gmail_service, calendar_service, acc_email, mid, acc_email):
                             batch_failed = True
 
-                    # Advancing the time cursor after a failed batch made failed, still-unread
-                    # messages permanently invisible to the Gmail after-query.
-                    if not batch_failed and not WORKER_STATE["stop_event"].is_set():
+                    # Exactly a full page means there may be additional unread messages in
+                    # this interval. Keep the old cursor and drain the next page on a later
+                    # iteration. Advance only when the API returns a short page successfully.
+                    if (
+                        len(msg_ids) < EMAIL_BATCH_SIZE
+                        and not batch_failed
+                        and not WORKER_STATE["stop_event"].is_set()
+                    ):
                         set_drive_setting(acc_email, "last_sync_epoch", str(current_epoch))
 
                 except (RefreshError, HttpError) as auth_e:

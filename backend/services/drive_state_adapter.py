@@ -354,7 +354,34 @@ def record_email_action_drive(account_email: str, action_data: Dict[str, Any]):
             state["failed_email_ids"] = failed_ids_state[-_PROCESSED_ID_LIMIT:]
             _PROCESSED_CACHE.setdefault(clean_email, set()).discard(mid)
 
-    commit_drive_state(clean_email)
+    # Do not leave an email marked processed when its history was not persisted.
+    if commit_drive_state(clean_email):
+        return True
+
+    # Turn this action into a retryable failure. The local shadow is written again
+    # after the update so a restart cannot reconstruct this ID as already processed.
+    with _CACHE_LOCK:
+        for action in state.get("email_actions", []):
+            if isinstance(action, dict) and str(action.get("email_id", "")) == mid:
+                old_status = str(action.get("status", "PROCESSED")).upper()
+                if old_status != "FAILED":
+                    stats[bucket(old_status)] = max(0, int(stats.get(bucket(old_status), 0)) - 1)
+                    stats["failed"] = int(stats.get("failed", 0)) + 1
+                action["status"] = "FAILED"
+                action["category"] = "Failed"
+                action["action_taken"] = "State persistence failed; will retry"
+                break
+        state["processed_email_ids"] = [
+            str(x) for x in state.get("processed_email_ids", []) if str(x) != mid
+        ]
+        failed_ids = [str(x) for x in state.get("failed_email_ids", []) if str(x) != mid]
+        if mid:
+            failed_ids.append(mid)
+        state["failed_email_ids"] = failed_ids[-_PROCESSED_ID_LIMIT:]
+        _PROCESSED_CACHE.setdefault(clean_email, set()).discard(mid)
+        snapshot = copy.deepcopy(state)
+    _save_local_shadow(clean_email, snapshot)
+    return False
 
 def get_drive_stats(email: str) -> Dict[str, int]:
     """Retrieves persistent lifetime stats directly from Google Drive state."""
@@ -413,6 +440,19 @@ def get_drive_setting(email: str, key: str, default: str = "") -> str:
 
     template_val = DEFAULT_STATE_TEMPLATE.get("settings", {}).get(key, "")
     return default if default else template_val
+
+
+def set_drive_settings(email: str, values: Dict[str, Any]) -> bool:
+    """Apply a settings patch to one account and persist it in one state commit."""
+    if not email or not email.strip() or not isinstance(values, dict):
+        return False
+    clean_email = email.strip().lower()
+    state = load_drive_state(clean_email)
+    with _CACHE_LOCK:
+        settings = state.setdefault("settings", {})
+        for key, value in values.items():
+            settings[str(key)] = str(value)
+    return commit_drive_state(clean_email)
 
 
 def set_drive_setting(email: str, key: str, value: str):

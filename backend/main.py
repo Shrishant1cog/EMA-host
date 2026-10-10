@@ -841,12 +841,13 @@ def background_worker_loop():
                     current_epoch = int(time.time())
 
                     if not last_epoch_str or last_epoch_str == "0":
+                        # First scan is bounded to the last day, but do not advance the
+                        # cursor until the whole batch succeeds; failed messages stay unread.
                         epoch_cutoff = current_epoch - (24 * 3600)
-                        set_drive_setting(acc_email, "last_sync_epoch", str(current_epoch))
                     else:
                         try:
                             epoch_cutoff = int(last_epoch_str)
-                        except ValueError:
+                        except (TypeError, ValueError):
                             epoch_cutoff = current_epoch - 3600
 
                     gmail_service, calendar_service = get_google_services_for_account(acc_email)
@@ -857,15 +858,20 @@ def background_worker_loop():
                         total_new_emails += len(msg_ids)
                         emit_user_log("INFO", f"Found {len(msg_ids)} new unread email(s) in {acc_email}.")
 
+                    batch_failed = False
                     for mid in msg_ids:
                         if WORKER_STATE["stop_event"].is_set():
                             break
                         if is_email_processed_drive(acc_email, mid):
                             continue
 
-                        process_single_email(gmail_service, calendar_service, acc_email, mid, acc_email)
+                        if not process_single_email(gmail_service, calendar_service, acc_email, mid, acc_email):
+                            batch_failed = True
 
-                    set_drive_setting(acc_email, "last_sync_epoch", str(current_epoch))
+                    # Advancing the time cursor after a failed batch made failed, still-unread
+                    # messages permanently invisible to the Gmail after-query.
+                    if not batch_failed and not WORKER_STATE["stop_event"].is_set():
+                        set_drive_setting(acc_email, "last_sync_epoch", str(current_epoch))
 
                 except (RefreshError, HttpError) as auth_e:
                     emit_user_log("WARN", f"Authentication error for {acc_email}: {auth_e}")
@@ -2521,8 +2527,22 @@ def update_calendar_event(payload: EventUpdatePayload, request: Request):
 
     try:
         from dateutil import parser as date_parser
-        start_dt = date_parser.isoparse(payload.start_time.replace("Z", "+00:00"))
-        end_dt = date_parser.isoparse(payload.end_time.replace("Z", "+00:00"))
+        from datetime import date as date_type
+        start_value = payload.start_time.strip()
+        end_value = payload.end_time.strip()
+        start_is_date = len(start_value) == 10 and "T" not in start_value
+        end_is_date = len(end_value) == 10 and "T" not in end_value
+        if start_is_date != end_is_date:
+            raise HTTPException(status_code=422, detail="start_time and end_time must both be all-day dates or both be timed datetimes.")
+        try:
+            if start_is_date:
+                start_dt = date_type.fromisoformat(start_value)
+                end_dt = date_type.fromisoformat(end_value)
+            else:
+                start_dt = date_parser.isoparse(start_value.replace("Z", "+00:00"))
+                end_dt = date_parser.isoparse(end_value.replace("Z", "+00:00"))
+        except (TypeError, ValueError) as parse_error:
+            raise HTTPException(status_code=422, detail="Invalid event date or time.") from parse_error
         if end_dt <= start_dt:
             raise HTTPException(status_code=422, detail="end_time must be later than start_time.")
         _, calendar_service = get_google_services_for_account(clean_cal)
@@ -2540,9 +2560,24 @@ def update_calendar_event(payload: EventUpdatePayload, request: Request):
         calendar_service.events().update(calendarId=clean_cal, eventId=payload.event_id, body=event).execute()
         emit_user_log("SUCCESS", f"Updated event '{payload.summary}' in {clean_cal}")
         return {"status": "success"}
-    except Exception as e:
-        logger.error(f"Error updating event: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except HttpError as e:
+        status = getattr(getattr(e, "resp", None), "status", None)
+        logger.warning("Google Calendar update failed (HTTP %s).", status)
+        if status == 404:
+            raise HTTPException(status_code=404, detail="Calendar event was not found.")
+        if status == 403:
+            raise HTTPException(status_code=403, detail="Google denied permission to update this event.")
+        if status == 400:
+            raise HTTPException(status_code=422, detail="Google Calendar rejected the event data.")
+        raise HTTPException(status_code=502, detail="Google Calendar is temporarily unavailable.")
+    except (TypeError, ValueError) as e:
+        logger.info("Invalid calendar update payload: %s", e)
+        raise HTTPException(status_code=422, detail="Invalid event date or time.")
+    except Exception:
+        logger.exception("Unexpected error updating calendar event.")
+        raise HTTPException(status_code=500, detail="Could not update calendar event.")
 
 
 class EventDeletePayload(BaseModel):
@@ -2562,9 +2597,17 @@ def delete_calendar_event(payload: EventDeletePayload, request: Request):
         calendar_service.events().delete(calendarId=clean_cal, eventId=payload.event_id).execute()
         emit_user_log("INFO", f"Deleted event ID {payload.event_id} from {clean_cal}")
         return {"status": "success"}
-    except Exception as e:
-        logger.error(f"Error deleting event: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except HttpError as e:
+        status = getattr(getattr(e, "resp", None), "status", None)
+        logger.warning("Google Calendar delete failed (HTTP %s).", status)
+        if status == 404:
+            raise HTTPException(status_code=404, detail="Calendar event was not found.")
+        if status == 403:
+            raise HTTPException(status_code=403, detail="Google denied permission to delete this event.")
+        raise HTTPException(status_code=502, detail="Google Calendar is temporarily unavailable.")
+    except Exception:
+        logger.exception("Unexpected error deleting calendar event.")
+        raise HTTPException(status_code=500, detail="Could not delete calendar event.")
 
 
 @app.get("/api/calendar/upcoming")
@@ -2587,7 +2630,8 @@ def get_upcoming_events(request: Request, max_events: int = 35, include_all: boo
             events_result = calendar_service.events().list(
                 calendarId=acc_email,
                 timeMin=now,
-                maxResults=35,
+                # Fetch up to the global cap from each calendar before merging/sorting.
+                maxResults=clamped_max,
                 singleEvents=True,
                 orderBy="startTime",
                 fields="items(id,summary,description,location,start,end,htmlLink,attachments,extendedProperties)",

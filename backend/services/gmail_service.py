@@ -332,9 +332,13 @@ def fetch_raw_attachments(
 
 
 def get_unprocessed_message_ids(
-    service, query: str = "label:INBOX", max_results: int = 10
+    service,
+    query: str = "label:INBOX",
+    max_results: int = 10,
+    *,
+    raise_errors: bool = False,
 ) -> List[MessageRef]:
-    """Queries Gmail inbox for recent matching messages."""
+    """Query Gmail; optionally propagate API failures so callers don't mistake them for an empty inbox."""
     try:
         results = (
             service.users()
@@ -345,7 +349,9 @@ def get_unprocessed_message_ids(
         messages = results.get("messages", [])
         return [MessageRef(m["id"], m.get("threadId", "")) for m in messages]
     except Exception as e:
-        logger.error(f"Failed to query Gmail messages: {e}")
+        logger.error("Failed to query Gmail messages: %s", e)
+        if raise_errors:
+            raise
         return []
 
 

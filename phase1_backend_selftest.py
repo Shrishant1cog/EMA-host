@@ -37,6 +37,58 @@ else:
 ev=CalendarEvent(summary='Test', start='2026-10-01T10:00:00+05:30', guests=[{'email':'a@example.com'}])
 assert ev.title=='Test' and ev.end and ev.guests==['a@example.com']
 
+# Date-only values must be actual calendar dates, not just YYYY-MM-DD-shaped strings.
+assert calendar_service._format_datetime_for_google('2026-10-01', 'Asia/Kolkata') == {'date': '2026-10-01'}
+for bad_date in ('2026-99-99', '2026-02-30'):
+    try:
+        calendar_service._format_datetime_for_google(bad_date, 'Asia/Kolkata')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(f'Invalid all-day date was accepted: {bad_date}')
+
+# Same title at a materially different time must not be mistaken for a duplicate.
+from unittest.mock import MagicMock
+calendar_api = MagicMock()
+calendar_api.events.return_value.list.return_value.execute.return_value = {
+    'items': [{
+        'id': 'existing-event',
+        'summary': 'Sprint Planning',
+        'description': '',
+        'location': '',
+        'start': {'dateTime': '2026-10-01T11:20:00+05:30'},
+        'end': {'dateTime': '2026-10-01T12:20:00+05:30'},
+    }]
+}
+candidate = CalendarEvent(
+    title='Sprint Planning',
+    start='2026-10-01T10:00:00+05:30',
+    end='2026-10-01T11:00:00+05:30',
+    timezone='Asia/Kolkata',
+)
+assert calendar_service.find_duplicate_event(calendar_api, candidate, 'primary') is None, \
+    'An event with the same title but a different start time was incorrectly treated as a duplicate'
+
+# Startup database initialization must preserve legacy email history tables.
+with tempfile.TemporaryDirectory() as temp_dir:
+    test_db = pathlib.Path(temp_dir) / 'history.db'
+    state_tracker.init_db(test_db, force=True)
+    conn = state_tracker.get_db_connection(test_db)
+    try:
+        conn.execute('CREATE TABLE IF NOT EXISTS email_actions (email_id TEXT PRIMARY KEY, action TEXT)')
+        conn.execute('INSERT INTO email_actions(email_id, action) VALUES (?, ?)', ('preserve-me', 'ACTIONED'))
+        conn.commit()
+    finally:
+        conn.close()
+    state_tracker.init_db(test_db, force=True)
+    conn = state_tracker.get_db_connection(test_db)
+    try:
+        rows = conn.execute('SELECT email_id, action FROM email_actions').fetchall()
+        assert len(rows) == 1 and rows[0]['email_id'] == 'preserve-me', \
+            'init_db unexpectedly removed existing email history'
+    finally:
+        conn.close()
+
 # Token encryption round trip with an isolated temporary key.
 try:
     from cryptography.fernet import Fernet

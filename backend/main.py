@@ -537,7 +537,7 @@ def get_dynamic_redirect_uri(request: Request) -> str:
 # ==============================================================================
 # PER-ACCOUNT CALENDAR ROUTING PIPELINE
 # ==============================================================================
-def process_single_email(
+def _process_single_email_unlocked(
     gmail_service, calendar_service, drive_email: str, mid: str, account_email: str
 ) -> bool:
     clean_acc_email = account_email.strip().lower()
@@ -746,6 +746,27 @@ def process_single_email(
             del email_data
 
 
+# Serialize processing by account so the real-time worker and historical
+# inspector cannot concurrently schedule the same messages for the same inbox.
+_EMAIL_PROCESS_LOCKS_GUARD = threading.RLock()
+_EMAIL_PROCESS_LOCKS: Dict[str, threading.RLock] = {}
+
+
+def process_single_email(
+    gmail_service, calendar_service, drive_email: str, mid: str, account_email: str
+) -> bool:
+    clean_account = str(account_email or drive_email or "").strip().lower()
+    if not clean_account:
+        logger.error("Refusing to process an email without an owning account.")
+        return False
+    with _EMAIL_PROCESS_LOCKS_GUARD:
+        account_lock = _EMAIL_PROCESS_LOCKS.setdefault(clean_account, threading.RLock())
+    with account_lock:
+        return _process_single_email_unlocked(
+            gmail_service, calendar_service, drive_email, mid, clean_account
+        )
+
+
 # ==============================================================================
 # BACKGROUND WORKER
 # ==============================================================================
@@ -756,6 +777,7 @@ WORKER_STATE = {
     "stop_event": threading.Event(),
 }
 WORKER_THREAD: Optional[threading.Thread] = None
+_WORKER_START_LOCK = threading.RLock()
 _WORKER_SCOPE_LOCK = threading.RLock()
 _WORKER_PAUSED_SESSIONS: set[str] = set()
 
@@ -867,12 +889,18 @@ def background_worker_loop():
 
 
 def start_worker_internal():
+    """Start at most one in-process worker thread (safe under concurrent API calls)."""
     global WORKER_THREAD
-    if WORKER_STATE["is_running"]:
-        return
-    WORKER_STATE["stop_event"].clear()
-    WORKER_THREAD = threading.Thread(target=background_worker_loop, daemon=True)
-    WORKER_THREAD.start()
+    with _WORKER_START_LOCK:
+        if WORKER_THREAD is not None and WORKER_THREAD.is_alive():
+            return
+        WORKER_STATE["stop_event"].clear()
+        WORKER_THREAD = threading.Thread(
+            target=background_worker_loop,
+            daemon=True,
+            name="EMA-Background-Worker",
+        )
+        WORKER_THREAD.start()
 
 
 def stop_worker_internal():
@@ -891,6 +919,7 @@ INSPECT_STATE = {
     "owner_session": None,
 }
 INSPECT_THREAD: Optional[threading.Thread] = None
+_INSPECT_START_LOCK = threading.RLock()
 
 
 def inspect_previous_loop(max_target: int, scoped_accounts: List[Dict[str, Any]]):
@@ -2035,11 +2064,13 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
                     GoogleRequest(),
                     config.GOOGLE_CLIENT_ID.strip(),
                 )
-                if verified_payload.get("email_verified") is False:
+                if verified_payload.get("email_verified") is not True:
                     raise ValueError("Google account email is not verified.")
-                user_email = verified_payload.get("email", "")
+                user_email = str(verified_payload.get("email", "") or "").strip()
                 user_name = verified_payload.get("name", "")
                 user_picture = verified_payload.get("picture", "")
+                if not user_email or "@" not in user_email:
+                    raise ValueError("Google ID token did not contain a valid email address.")
             except Exception as verify_err:
                 logger.warning(f"Google ID token verification failed; using OAuth userinfo fallback: {verify_err}")
 
@@ -2048,14 +2079,23 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
                 from googleapiclient.discovery import build
                 service = build("oauth2", "v2", credentials=creds, cache_discovery=False, static_discovery=False)
                 ui = service.userinfo().get().execute()
-                user_email = ui.get("email", "")
+                # The OAuth userinfo endpoint is queried with the credentials
+                # returned by Google's token exchange. Require explicit verification
+                # rather than inventing a local identity if this request fails.
+                if ui.get("verified_email") is not True:
+                    raise ValueError("Google userinfo did not confirm a verified email address.")
+                user_email = str(ui.get("email", "") or "").strip()
                 user_name = ui.get("name", user_email)
                 user_picture = ui.get("picture", "")
-            except Exception:
-                user_email = f"user_{session_id[:6]}@gmail.com"
-                user_name = "User"
+                if not user_email or "@" not in user_email:
+                    raise ValueError("Google userinfo did not contain a valid email address.")
+            except Exception as userinfo_err:
+                logger.error("Could not verify Google account identity: %s", userinfo_err)
+                raise ValueError("Google identity could not be verified. Please try signing in again.") from userinfo_err
 
         clean_user_email = user_email.strip().lower()
+        if not clean_user_email or "@" not in clean_user_email:
+            raise ValueError("Google did not return a valid verified email address.")
 
         existing_session_accounts = get_accounts_for_session(session_id)
         authenticated_session_id = session_id if existing_session_accounts else secrets.token_urlsafe(32)
@@ -2636,14 +2676,27 @@ def start_inspect(req: InspectRequest, request: Request):
     if not session_accs:
         raise HTTPException(status_code=400, detail="No monitored accounts found for this session.")
 
-    if INSPECT_STATE["is_running"]:
-        return {"status": "already_running"}
-
     count = min(max(10, req.count), 40)
-    INSPECT_STATE["stop_event"].clear()
-    INSPECT_STATE["owner_session"] = sid
-    INSPECT_THREAD = threading.Thread(target=inspect_previous_loop, args=(count, session_accs), daemon=True, name="EMA-Inspector")
-    INSPECT_THREAD.start()
+    with _INSPECT_START_LOCK:
+        if INSPECT_STATE["is_running"] or (INSPECT_THREAD is not None and INSPECT_THREAD.is_alive()):
+            return {"status": "already_running"}
+        INSPECT_STATE["stop_event"].clear()
+        INSPECT_STATE["owner_session"] = sid
+        # Claim the state before starting the thread, preventing two rapid requests
+        # from both launching separate inspector loops.
+        INSPECT_STATE["is_running"] = True
+        INSPECT_THREAD = threading.Thread(
+            target=inspect_previous_loop,
+            args=(count, session_accs),
+            daemon=True,
+            name="EMA-Inspector",
+        )
+        try:
+            INSPECT_THREAD.start()
+        except Exception:
+            INSPECT_STATE["is_running"] = False
+            INSPECT_STATE["owner_session"] = None
+            raise
     return {"status": "started", "target_count": count}
 
 

@@ -227,13 +227,10 @@ def find_duplicate_event(
                 candidate_start = event_start(existing)
                 if candidate_start is not None:
                     try:
-                    except Exception:
-                        pass
-                    try:
                         delta = abs((candidate_start - start_dt).total_seconds())
                         if delta <= 10 * 60:
                             return existing
-                    except Exception:
+                    except (TypeError, ValueError, OverflowError):
                         pass
 
         return None

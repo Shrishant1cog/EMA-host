@@ -78,6 +78,7 @@ from backend.services.drive_state_adapter import (
     list_drive_emails,
     get_drive_setting,
     set_drive_setting,
+    set_drive_settings,
     is_reauth_needed,
     clear_account_reauth,
 )
@@ -2471,38 +2472,58 @@ def update_app_settings(payload: SettingsPayload, request: Request):
     if not session_accs:
         raise HTTPException(status_code=401, detail="Unauthorized: No active accounts found for this session.")
 
+    # Validate the whole patch before performing any writes, so malformed values
+    # cannot leave a subset of settings updated on an account.
+    settings: Dict[str, Any] = {}
+    if payload.only_remind_with_files is not None:
+        settings["only_remind_with_files"] = str(payload.only_remind_with_files).lower()
+    if payload.design_events_enabled is not None:
+        settings["design_events_enabled"] = str(payload.design_events_enabled).lower()
+    if payload.design_events_prompt is not None:
+        settings["design_events_prompt"] = payload.design_events_prompt.strip()[:500]
+    if payload.spam_protection_enabled is not None:
+        settings["spam_protection_enabled"] = str(payload.spam_protection_enabled).lower()
+    if payload.spam_threshold is not None:
+        settings["spam_threshold"] = str(max(10, min(95, payload.spam_threshold)))
+    if payload.default_timing is not None:
+        clean_time = payload.default_timing.strip()
+        if not _valid_hhmm(clean_time):
+            raise HTTPException(status_code=422, detail="default_timing must use HH:MM in 24-hour format.")
+        settings["default_timing"] = clean_time
+    if payload.theme_mode is not None:
+        theme = payload.theme_mode.strip().lower()
+        if theme not in {"dark", "read"}:
+            raise HTTPException(status_code=422, detail="theme_mode must be 'dark' or 'read'.")
+        settings["theme_mode"] = theme
+    if payload.target_calendar_account is not None:
+        target = payload.target_calendar_account.strip().lower()
+        allowed_targets = {a["email"].strip().lower() for a in session_accs}
+        if target not in allowed_targets and target != "auto":
+            raise HTTPException(status_code=403, detail="Target calendar must belong to one of your connected accounts.")
+        settings["target_calendar_account"] = target or "auto"
+
+    if not settings:
+        return {"status": "success", "updated": False}
+
+    failed_accounts = []
     for acc in session_accs:
         acc_email = acc["email"].strip().lower()
-        if payload.only_remind_with_files is not None:
-            set_drive_setting(acc_email, "only_remind_with_files", str(payload.only_remind_with_files).lower())
-        if payload.design_events_enabled is not None:
-            set_drive_setting(acc_email, "design_events_enabled", str(payload.design_events_enabled).lower())
-        if payload.design_events_prompt is not None:
-            set_drive_setting(acc_email, "design_events_prompt", payload.design_events_prompt.strip()[:500])
-        if payload.spam_protection_enabled is not None:
-            set_drive_setting(acc_email, "spam_protection_enabled", str(payload.spam_protection_enabled).lower())
-        if payload.spam_threshold is not None:
-            clamped = max(10, min(95, payload.spam_threshold))
-            set_drive_setting(acc_email, "spam_threshold", str(clamped))
-        if payload.default_timing is not None:
-            clean_time = payload.default_timing.strip()
-            if not _valid_hhmm(clean_time):
-                raise HTTPException(status_code=422, detail="default_timing must use HH:MM in 24-hour format.")
-            set_drive_setting(acc_email, "default_timing", clean_time)
-        if payload.theme_mode is not None:
-            theme = payload.theme_mode.strip().lower()
-            if theme not in {"dark", "read"}:
-                raise HTTPException(status_code=422, detail="theme_mode must be 'dark' or 'read'.")
-            set_drive_setting(acc_email, "theme_mode", theme)
-        if payload.target_calendar_account is not None:
-            target = payload.target_calendar_account.strip().lower()
-            allowed_targets = {a["email"].strip().lower() for a in session_accs}
-            if target not in allowed_targets and target != "auto":
-                raise HTTPException(status_code=403, detail="Target calendar must belong to one of your connected accounts.")
-            set_drive_setting(acc_email, "target_calendar_account", target or "auto")
+        try:
+            if not set_drive_settings(acc_email, settings):
+                failed_accounts.append(acc_email)
+        except Exception:
+            logger.exception("Settings persistence failed for %s.", acc_email)
+            failed_accounts.append(acc_email)
+
+    if failed_accounts:
+        emit_user_log("ERROR", f"Settings save failed for {len(failed_accounts)} connected account(s).")
+        raise HTTPException(
+            status_code=503,
+            detail="Settings could not be saved for every connected account. Please retry; some accounts may already have saved.",
+        )
 
     emit_user_log("INFO", "Settings updated and saved to Google Drive.")
-    return {"status": "success"}
+    return {"status": "success", "updated": True}
 
 
 # ==============================================================================

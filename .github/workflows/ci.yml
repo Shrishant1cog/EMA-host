@@ -1,0 +1,51 @@
+name: EMA CI
+
+on:
+  push:
+    branches:
+      - main
+      - fix/ema-audit-remediation
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-and-frontend-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Compile all Python files and run structural checks
+        run: python phase1_backend_test.py
+
+      - name: Run deterministic backend self-tests
+        run: python phase1_backend_selftest.py
+
+      - name: Run frontend smoke tests
+        run: python tools/frontend_smoke_test.py
+
+      - name: Run UX contract tests
+        run: python tools/ux_contract_test.py

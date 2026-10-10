@@ -69,6 +69,18 @@ candidate = CalendarEvent(
 assert calendar_service.find_duplicate_event(calendar_api, candidate, 'primary') is None, \
     'An event with the same title but a different start time was incorrectly treated as a duplicate'
 
+# Gmail query failures must not be returned as an empty inbox when the worker asks to retry them.
+from backend.services import gmail_service
+failing_gmail = MagicMock()
+failing_gmail.users.return_value.messages.return_value.list.return_value.execute.side_effect = RuntimeError('offline')
+assert gmail_service.get_unprocessed_message_ids(failing_gmail) == []
+try:
+    gmail_service.get_unprocessed_message_ids(failing_gmail, raise_errors=True)
+except RuntimeError:
+    pass
+else:
+    raise AssertionError('raise_errors=True did not propagate Gmail API failures')
+
 # Startup database initialization must preserve legacy email history tables.
 with tempfile.TemporaryDirectory() as temp_dir:
     test_db = pathlib.Path(temp_dir) / 'history.db'

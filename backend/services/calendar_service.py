@@ -114,9 +114,14 @@ def _format_datetime_for_google(
     clean = str(dt_str or "").strip()
     safe_zone = _get_safe_zoneinfo(timezone_str)
 
-    # Date-only format (All-Day Event)
+    # Date-only format (All-Day Event). Validate the actual calendar date,
+    # not merely the string shape (e.g. reject 2026-99-99).
     if len(clean) == 10 and clean.count("-") == 2 and "T" not in clean:
-        return {"date": clean}
+        try:
+            datetime.strptime(clean, "%Y-%m-%d")
+            return {"date": clean}
+        except ValueError as exc:
+            raise ValueError(f"Invalid calendar date: {dt_str!r}") from exc
 
     try:
         clean_iso = clean.replace("Z", "+00:00")
@@ -174,36 +179,62 @@ def find_duplicate_event(
                 maxResults=25,
                 singleEvents=True,
                 orderBy="startTime",
-                fields="items(id,summary,description,location,htmlLink,extendedProperties)",
+                fields="items(id,summary,description,location,start,end,htmlLink,extendedProperties)",
             )
             .execute()
         )
 
         items = events_result.get("items", [])
-        target_title = ev.title.strip().lower()
-        target_url = (ev.meeting_url or "").strip().lower()
+        target_title = ev.title.strip().casefold()
+        target_url = (ev.meeting_url or "").strip().casefold()
+
+        def event_start(existing_event: Dict[str, Any]) -> Optional[datetime]:
+            start_value = existing_event.get("start", {}) or {}
+            raw = start_value.get("dateTime") or start_value.get("date")
+            if not raw:
+                return None
+            try:
+                if len(raw) == 10 and "T" not in raw:
+                    return datetime.fromisoformat(raw).replace(hour=9, minute=0, tzinfo=tz)
+                parsed = parser.isoparse(raw.replace("Z", "+00:00"))
+                return parsed.replace(tzinfo=tz) if parsed.tzinfo is None else parsed.astimezone(tz)
+            except (TypeError, ValueError):
+                return None
 
         for existing in items:
-            existing_title = existing.get("summary", "").strip().lower()
-            existing_desc = existing.get("description", "").lower()
-            existing_loc = existing.get("location", "").lower()
+            existing_title = (existing.get("summary") or "").strip().casefold()
+            existing_desc = (existing.get("description") or "").casefold()
+            existing_loc = (existing.get("location") or "").casefold()
 
-            # 1. Exact title match
-            if target_title and target_title == existing_title:
-                return existing
-
-            # 2. Substring match for non-trivial titles (> 5 characters)
-            if len(target_title) > 5 and (target_title in existing_title or existing_title in target_title):
-                return existing
-
-            # 3. Meeting URL match
+            # A meeting URL is a strong identity signal; titles alone or substring
+            # matches cause false positives for recurring or similarly named meetings.
             if target_url and (target_url in existing_desc or target_url in existing_loc):
                 return existing
 
-            # 4. Extended Property match (Events scheduled by EMA)
-            priv = existing.get("extendedProperties", {}).get("private", {})
-            if priv.get("source") == "EmailAutomater" and target_title == existing_title:
-                return existing
+            priv = (existing.get("extendedProperties") or {}).get("private", {})
+            if priv.get("source") == "EmailAutomater":
+                signature = str(priv.get("ema_signature") or "").strip()
+                source_id = str(priv.get("source_email_id") or "").strip()
+                incoming_signature = str(getattr(ev, "signature", "") or "").strip()
+                incoming_source_id = str(getattr(ev, "source_email_id", "") or "").strip()
+                if (signature and incoming_signature and signature == incoming_signature) or (
+                    source_id and incoming_source_id and source_id == incoming_source_id
+                ):
+                    return existing
+
+            # Fall back only to an exact title plus a very close start time.
+            if target_title and target_title == existing_title:
+                candidate_start = event_start(existing)
+                if candidate_start is not None:
+                    try:
+                    except Exception:
+                        pass
+                    try:
+                        delta = abs((candidate_start - start_dt).total_seconds())
+                        if delta <= 10 * 60:
+                            return existing
+                    except Exception:
+                        pass
 
         return None
     except Exception as e:

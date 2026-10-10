@@ -105,8 +105,8 @@ def init_db(db_path: Path = DEFAULT_DB_PATH, force: bool = False):
             columns = {row[1] for row in cur.fetchall()}
             if "session_id" not in columns:
                 cur.execute("ALTER TABLE google_accounts ADD COLUMN session_id TEXT")
-            cur.execute("DROP TABLE IF EXISTS email_actions")
-            cur.execute("DROP TABLE IF EXISTS _email_actions_old")
+            # Never delete user history during startup. Legacy history tables are retained
+            # and may be migrated explicitly by a dedicated, backup-backed migration.
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS system_settings (
                     key TEXT PRIMARY KEY,

@@ -2045,7 +2045,7 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
 
         frontend_url = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
         if frontend_url:
-            return RedirectResponse(url=f"{frontend_url}/login.html?auth_error={quote(safe_err, safe="")}", status_code=303)
+            return RedirectResponse(url=f"{frontend_url}/login.html?auth_error={quote(safe_err, safe='')}", status_code=303)
         return JSONResponse({"authenticated": False, "error": safe_err}, status_code=400)
 
     try:
@@ -2165,7 +2165,7 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
         """
         frontend_url = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
         if frontend_url:
-            redirect_url = f"{frontend_url}/index.html#ema_session={quote(authenticated_session_id, safe="")}"
+            redirect_url = f"{frontend_url}/index.html#ema_session={quote(authenticated_session_id, safe='')}"
             response = RedirectResponse(url=redirect_url, status_code=303)
             response.headers["Cache-Control"] = "no-store, max-age=0"
         else:

@@ -273,19 +273,29 @@ def create_or_update_event(
 
     # 2. Build start and end payloads. Invalid times fail closed; never invent tomorrow.
     try:
-        if ev.all_day:
-            start_date = str(ev.start).split("T")[0]
-            end_date = str(ev.end).split("T")[0] if ev.end else start_date
-            if len(start_date) != 10 or len(end_date) != 10:
-                raise ValueError("Invalid all-day event date")
-            if start_date == end_date:
-                dt_s = datetime.fromisoformat(start_date)
-                end_date = (dt_s + timedelta(days=1)).strftime("%Y-%m-%d")
+        start_raw = str(ev.start or "").strip()
+        end_raw = str(ev.end or ev.start or "").strip()
+        start_is_date = len(start_raw) == 10 and "T" not in start_raw
+        end_is_date = len(end_raw) == 10 and "T" not in end_raw
+        if ev.all_day or (start_is_date and end_is_date):
+            start_date = start_raw.split("T")[0]
+            end_date = end_raw.split("T")[0]
+            # Validate dates and preserve Google's exclusive all-day end semantics.
+            dt_start_date = datetime.strptime(start_date, "%Y-%m-%d")
+            dt_end_date = datetime.strptime(end_date, "%Y-%m-%d")
+            if dt_end_date < dt_start_date:
+                raise ValueError("All-day event end date must not precede its start date.")
+            if dt_start_date == dt_end_date:
+                end_date = (dt_start_date + timedelta(days=1)).strftime("%Y-%m-%d")
             start_payload = {"date": start_date}
             end_payload = {"date": end_date}
         else:
-            start_payload = _format_datetime_for_google(ev.start, tz_str)
-            end_payload = _format_datetime_for_google(ev.end or ev.start, tz_str)
+            if start_is_date or end_is_date:
+                raise ValueError("Start and end must both be dates for all-day events or both be datetimes.")
+            start_payload = _format_datetime_for_google(start_raw, tz_str)
+            end_payload = _format_datetime_for_google(end_raw, tz_str)
+            if "dateTime" not in start_payload or "dateTime" not in end_payload:
+                raise ValueError("Timed events require start and end datetimes.")
             dt_start = parser.isoparse(start_payload["dateTime"])
             dt_end = parser.isoparse(end_payload["dateTime"])
             if dt_end <= dt_start:

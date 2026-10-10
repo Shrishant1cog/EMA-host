@@ -24,6 +24,8 @@ checks={
  'worker_start_race_guard':'_WORKER_START_LOCK' in main and 'WORKER_THREAD.is_alive()' in main,
  'account_processing_lock':'_EMAIL_PROCESS_LOCKS_GUARD' in main and 'def process_single_email(' in main,
  'calendar_update_preserves_http_errors':'except HTTPException:' in main[main.find('def update_calendar_event'):main.find('class EventDeletePayload')],
+ 'gmail_query_errors_propagate':'raise_errors=True' in main and 'if len(msg_ids) < EMAIL_BATCH_SIZE' in main,
+ 'batch_settings_persist_together':'set_drive_settings' in main,
 }
 for k,v in checks.items():
     if not v: fail.append(k)

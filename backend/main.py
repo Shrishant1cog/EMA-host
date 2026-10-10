@@ -2539,8 +2539,14 @@ def update_calendar_event(payload: EventUpdatePayload, request: Request):
                 start_dt = date_type.fromisoformat(start_value)
                 end_dt = date_type.fromisoformat(end_value)
             else:
+                from zoneinfo import ZoneInfo
+                local_tz = ZoneInfo(getattr(config, "USER_TIMEZONE", "Asia/Kolkata"))
                 start_dt = date_parser.isoparse(start_value.replace("Z", "+00:00"))
                 end_dt = date_parser.isoparse(end_value.replace("Z", "+00:00"))
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=local_tz)
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.replace(tzinfo=local_tz)
         except (TypeError, ValueError) as parse_error:
             raise HTTPException(status_code=422, detail="Invalid event date or time.") from parse_error
         if end_dt <= start_dt:

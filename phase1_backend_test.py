@@ -22,6 +22,7 @@ checks={
  'oauth_fails_closed':'user_{session_id[:6]}' not in main and 'ui.get("verified_email") is not True' in main,
  'no_destructive_history_drop':'DROP TABLE IF EXISTS email_actions' not in (ROOT/'backend/utils/state_tracker.py').read_text(encoding='utf-8'),
  'worker_start_race_guard':'_WORKER_START_LOCK' in main and 'WORKER_THREAD.is_alive()' in main,
+ 'worker_restart_on_shutdown_race':'_WORKER_RESTART_REQUESTED' in main and 'target=_background_worker_entry' in main,
  'account_processing_lock':'_EMAIL_PROCESS_LOCKS_GUARD' in main and 'def process_single_email(' in main,
  'calendar_update_preserves_http_errors':'except HTTPException:' in main[main.find('def update_calendar_event'):main.find('class EventDeletePayload')],
  'gmail_query_errors_propagate':'raise_errors=True' in main and 'if len(msg_ids) < EMAIL_BATCH_SIZE' in main,

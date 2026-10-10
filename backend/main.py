@@ -691,7 +691,7 @@ def _process_single_email_unlocked(
             status = "PROCESSED"
             emit_user_log("INFO", f"Processed email '{subject}' for {clean_acc_email} — No calendar action needed.")
 
-        record_email_action_drive(
+        action_saved = record_email_action_drive(
             account_email=clean_acc_email,
             action_data={
                 "email_id": str(mid),
@@ -710,6 +710,9 @@ def _process_single_email_unlocked(
                 "processed_at": datetime.now().isoformat(),
             },
         )
+        if not action_saved:
+            emit_user_log("WARN", f"State was not persisted for {clean_acc_email}; leaving '{subject}' unread for retry.")
+            return False
 
         # Keep failed messages unread so the worker can retry them later.
         if status != "FAILED":
@@ -2171,13 +2174,14 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
         return response
 
     except Exception as e:
-        err_msg = str(e)
-        emit_user_log("ERROR", f"Account authentication failed: {err_msg}")
+        logger.exception("Google account authentication failed.")
+        public_err_msg = "Google sign-in could not be completed. Please try again."
+        emit_user_log("ERROR", "Google account authentication failed; see server logs for diagnostic details.")
         if session_id:
-            set_auth_flow(session_id, status="failed", error=err_msg)
+            set_auth_flow(session_id, status="failed", error=public_err_msg)
         frontend_url = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
         if frontend_url:
-            msg = quote(str(err_msg), safe="")
+            msg = quote(public_err_msg, safe="")
             response = RedirectResponse(url=f"{frontend_url}/login.html?auth_error={msg}", status_code=303)
             response.headers["Cache-Control"] = "no-store, max-age=0"
             return response
@@ -2190,7 +2194,7 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
               <main style="max-width:520px;width:100%;padding:32px;border-radius:24px;background:#0f172a;border:1px solid rgba(244,63,94,.3);text-align:center;box-sizing:border-box">
                 <div style="width:48px;height:48px;border-radius:50%;background:rgba(244,63,94,.1);color:#fb7185;display:grid;place-items:center;margin:0 auto 16px;font-size:22px;font-weight:800">✕</div>
                 <h1 style="margin:0;color:#fff;font-size:20px">Authentication Failed</h1>
-                <p style="color:#94a3b8;font-size:13px;line-height:1.6;overflow-wrap:anywhere">{html.escape(err_msg)}</p>
+                <p style="color:#94a3b8;font-size:13px;line-height:1.6;overflow-wrap:anywhere">{html.escape(public_err_msg)}</p>
                 <a href="/auth/login?browser=1" style="display:inline-block;margin-top:10px;padding:11px 16px;border-radius:12px;background:#4f46e5;color:#fff;text-decoration:none;font-size:12px;font-weight:700">Try Again</a>
               </main>
             </body>

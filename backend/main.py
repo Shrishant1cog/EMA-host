@@ -782,6 +782,7 @@ WORKER_STATE = {
 }
 WORKER_THREAD: Optional[threading.Thread] = None
 _WORKER_START_LOCK = threading.RLock()
+_WORKER_RESTART_REQUESTED = False
 _WORKER_SCOPE_LOCK = threading.RLock()
 _WORKER_PAUSED_SESSIONS: set[str] = set()
 
@@ -922,15 +923,36 @@ def background_worker_loop():
     emit_user_log("INFO", "Background monitor paused.")
 
 
+def _background_worker_entry():
+    """Maintain worker lifecycle and honor a start request made during shutdown."""
+    global WORKER_THREAD, _WORKER_RESTART_REQUESTED
+    current_thread = threading.current_thread()
+    try:
+        background_worker_loop()
+    finally:
+        with _WORKER_START_LOCK:
+            if WORKER_THREAD is current_thread:
+                WORKER_THREAD = None
+            restart = _WORKER_RESTART_REQUESTED
+            _WORKER_RESTART_REQUESTED = False
+        if restart:
+            start_worker_internal()
+
+
 def start_worker_internal():
     """Start at most one in-process worker thread (safe under concurrent API calls)."""
-    global WORKER_THREAD
+    global WORKER_THREAD, _WORKER_RESTART_REQUESTED
     with _WORKER_START_LOCK:
         if WORKER_THREAD is not None and WORKER_THREAD.is_alive():
+            # Do not launch a second worker during shutdown, but don't lose a fresh
+            # start request either; the exiting thread's wrapper will restart once.
+            if WORKER_STATE["stop_event"].is_set():
+                _WORKER_RESTART_REQUESTED = True
             return
+        _WORKER_RESTART_REQUESTED = False
         WORKER_STATE["stop_event"].clear()
         WORKER_THREAD = threading.Thread(
-            target=background_worker_loop,
+            target=_background_worker_entry,
             daemon=True,
             name="EMA-Background-Worker",
         )

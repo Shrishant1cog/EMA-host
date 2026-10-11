@@ -101,6 +101,53 @@ with tempfile.TemporaryDirectory() as temp_dir:
     finally:
         conn.close()
 
+# Expired legacy session IDs must not be reactivated from an account row.
+with tempfile.TemporaryDirectory() as temp_dir:
+    test_db = pathlib.Path(temp_dir) / 'session-expiry.db'
+    state_tracker.init_db(test_db, force=True)
+    state_tracker.upsert_google_account(
+        email='legacy@example.com',
+        name='Legacy',
+        picture='',
+        token_data='{}',
+        session_id='legacy-session-token',
+        db_path=test_db,
+    )
+    assert not state_tracker.ensure_legacy_session('legacy-session-token', db_path=test_db), \
+        'A legacy account row must not revive a session without a valid session record'
+    assert not state_tracker.is_user_session_valid('legacy-session-token', db_path=test_db)
+
+# Source-message identity should prevent duplicate creation after a Drive state-save retry.
+calendar_api = MagicMock()
+calendar_api.events.return_value.list.return_value.execute.return_value = {
+    'items': [{
+        'id': 'event-from-retried-email',
+        'summary': 'Sprint Planning',
+        'description': '',
+        'location': '',
+        'start': {'dateTime': '2026-10-01T10:00:00+05:30'},
+        'end': {'dateTime': '2026-10-01T11:00:00+05:30'},
+        'extendedProperties': {'private': {'source': 'EmailAutomater', 'source_email_id': 'gmail-message-123'}},
+    }]
+}
+same_event = calendar_service.find_duplicate_event(
+    calendar_api, candidate, 'primary', source_email_id='gmail-message-123'
+)
+assert same_event and same_event.get('id') == 'event-from-retried-email', \
+    'An event created from the same Gmail source message must be recognized on retry'
+
+# If duplicate verification is unavailable for a source-aware retry, fail closed.
+failing_calendar = MagicMock()
+failing_calendar.events.return_value.list.return_value.execute.side_effect = RuntimeError('calendar offline')
+try:
+    calendar_service.find_duplicate_event(
+        failing_calendar, candidate, 'primary', source_email_id='gmail-message-456'
+    )
+except RuntimeError:
+    pass
+else:
+    raise AssertionError('Calendar duplicate verification failure must not silently permit creation')
+
 # Token encryption round trip with an isolated temporary key.
 try:
     from cryptography.fernet import Fernet

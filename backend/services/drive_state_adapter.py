@@ -1,13 +1,18 @@
 import io
 import json
 import copy
+import hashlib
 import logging
+import os
+import tempfile
 import threading
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
 
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from googleapiclient.errors import HttpError
+
+import config
 
 from backend.services.google_auth import (
     get_drive_service_for_account,
@@ -70,8 +75,17 @@ def _get_commit_lock(email: str) -> threading.RLock:
 
 
 def _get_shadow_path(email: str) -> Path:
-    safe_name = "".join(c if c.isalnum() else "_" for c in email.lower())
-    return BASE_DIR / f".state_shadow_{safe_name}.json"
+    clean_email = str(email or "").strip().lower()
+    safe_name = "".join(c if c.isalnum() else "_" for c in clean_email)
+    # Keep the fallback shadow alongside the configured persistent database,
+    # not in Render's ephemeral source directory. Hash the complete identity too,
+    # because punctuation-normalized email names can otherwise collide.
+    configured_db = Path(getattr(config, "DB_PATH", BASE_DIR / "assistant_v2.db")).expanduser()
+    shadow_dir = Path(
+        os.getenv("EMA_STATE_SHADOW_DIR", str(configured_db.parent / ".ema-state-shadows"))
+    ).expanduser()
+    digest = hashlib.sha256(clean_email.encode("utf-8")).hexdigest()[:16]
+    return shadow_dir / f"{safe_name[:80]}_{digest}.json"
 
 
 def _load_local_shadow(email: str) -> Optional[Dict[str, Any]]:
@@ -82,18 +96,34 @@ def _load_local_shadow(email: str) -> Optional[Dict[str, Any]]:
                 data = json.load(f)
                 if isinstance(data, dict):
                     return data
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Could not read local state shadow for %s: %s", email, exc)
     return None
 
 
 def _save_local_shadow(email: str, state: Dict[str, Any]):
     path = _get_shadow_path(email)
+    temp_path: Optional[Path] = None
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(state, f, separators=(',', ':'))
-    except Exception as e:
-        logger.debug(f"Shadow save error for {email}: {e}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Atomically replace the last valid shadow. A process interruption during
+        # JSON writing must not leave a truncated file that masks a recoverable state.
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=str(path.parent),
+            prefix=path.name + ".", suffix=".tmp", delete=False
+        ) as handle:
+            temp_path = Path(handle.name)
+            json.dump(state, handle, separators=(",", ":"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except Exception as exc:
+        logger.warning("Could not save local state shadow for %s: %s", email, exc)
+        if temp_path:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _get_or_create_state_file_id(drive_service, email: str) -> str:

@@ -70,6 +70,23 @@ candidate = CalendarEvent(
 assert calendar_service.find_duplicate_event(calendar_api, candidate, 'primary') is None, \
     'An event with the same title but a different start time was incorrectly treated as a duplicate'
 
+# Calendar must not create an event when duplicate-check lookup fails.
+calendar_lookup_failure = MagicMock()
+calendar_lookup_failure.events.return_value.list.return_value.execute.side_effect = RuntimeError('calendar offline')
+lookup_candidate = CalendarEvent(
+    title='Network Failure Meeting',
+    start='2026-10-05T10:00:00+05:30',
+    end='2026-10-05T11:00:00+05:30',
+    timezone='Asia/Kolkata',
+)
+lookup_result = calendar_service.create_or_update_event(
+    calendar_lookup_failure,
+    lookup_candidate,
+    calendar_id='primary',
+)
+assert lookup_result.status == 'failed', "Calendar insertion should fail closed when duplicate lookup fails"
+assert not calendar_lookup_failure.events.return_value.insert.called, "Event insert ran without duplicate verification"
+
 # Gmail query failures must not be returned as an empty inbox when the worker asks to retry them.
 from backend.services import gmail_service
 failing_gmail = MagicMock()

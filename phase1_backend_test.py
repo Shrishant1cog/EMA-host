@@ -33,7 +33,7 @@ checks={
  'worker_restart_on_shutdown_race':'_WORKER_RESTART_REQUESTED' in main and 'target=_background_worker_entry' in main,
  'account_processing_lock':'_EMAIL_PROCESS_LOCKS_GUARD' in main and 'def process_single_email(' in main,
  'calendar_update_preserves_http_errors':'except HTTPException:' in main[main.find('def update_calendar_event'):main.find('class EventDeletePayload')],
- 'gmail_query_errors_propagate':'raise_errors=True' in main and 'len(msg_ids) < EMAIL_BATCH_SIZE' in main,
+ 'gmail_query_errors_propagate':'page.get("nextPageToken")' in main and 'page_args["pageToken"]' in main and 'gmail_service.users().messages().list(**page_args).execute()' in main,
  'stable_initial_backfill_cursor':'set_drive_setting(acc_email, "last_sync_epoch", str(epoch_cutoff))' in main,
  'batch_settings_persist_together':'set_drive_settings' in main,
 }

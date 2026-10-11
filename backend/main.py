@@ -490,9 +490,12 @@ def get_request_session_id(request: Request) -> Optional[str]:
     sid = sid.strip()
     if len(sid) > 256 or any(ord(ch) < 32 for ch in sid):
         return None
-    if is_user_session_valid(sid):
-        touch_user_session(sid)
-        _touch_session(sid)
+    # Invalid/expired IDs are not authenticated sessions. OAuth login keeps its
+    # temporary correlation ID in a separate flow record and does not rely on this.
+    if not is_user_session_valid(sid):
+        return None
+    touch_user_session(sid)
+    _touch_session(sid)
     return sid
 
 
@@ -2012,43 +2015,30 @@ def auth_login(
     session_id: Optional[str] = None,
     browser: Optional[str] = None,
     email: Optional[str] = None,
+    flow_id: Optional[str] = None,
 ):
     existing_sid = get_request_session_id(request)
     existing_accounts = get_accounts_for_session(existing_sid) if existing_sid else []
-    # OAuth state is an ephemeral flow identifier. For a first login, create a fresh server-side session token separately.
-    sid = existing_sid if existing_accounts else secrets.token_urlsafe(32)
-    locked_redirect_uri = get_dynamic_redirect_uri(request)
-
-    flow = build_oauth_flow(request=request, state=sid, redirect_uri=locked_redirect_uri)
-
-    auth_kwargs: Dict[str, Any] = {
-        "state": sid,
-        "access_type": "offline",
-        "prompt": "consent select_account",
-        "include_granted_scopes": "false",
-    }
-    if email:
-        auth_kwargs["login_hint"] = email.strip().lower()
-
-    auth_url, _ = flow.authorization_url(**auth_kwargs)
-
-    set_auth_flow(
-        sid,
-        status="pending",
-        redirect_uri=locked_redirect_uri,
-        code_verifier=flow.code_verifier or "",
-        error=None,
-    )
+    supplied_sid = str(session_id or "").strip()
+    if len(supplied_sid) > 256 or any(ord(ch) < 32 for ch in supplied_sid):
+        supplied_sid = ""
+    # A temporary correlation value is not an authenticated session. OAuth state
+    # is always a separate random token and is never the active bearer session ID.
+    sid = existing_sid if existing_accounts else (supplied_sid or secrets.token_urlsafe(32))
 
     if browser != "1":
-        hint_param = f"&email={email.strip().lower()}" if email else ""
-        chrome_target = f"http://127.0.0.1:8000/auth/login?session_id={sid}&browser=1{hint_param}"
+        completion_flow_id = secrets.token_urlsafe(32)
+        set_auth_flow(completion_flow_id, status="pending", session_id=sid, error=None)
+        hint_param = f"&email={quote(email.strip().lower(), safe='')}" if email else ""
+        chrome_target = (
+            f"http://127.0.0.1:8000/auth/login?session_id={quote(sid, safe='')}"
+            f"&flow_id={quote(completion_flow_id, safe='')}&browser=1{hint_param}"
+        )
         open_in_chrome_or_default(chrome_target)
-
         waiting_html = f"""
         <!DOCTYPE html>
         <html lang="en">
-        <head><meta charset="UTF-8"><title>Connecting to Google...</title><script src="https://cdn.tailwindcss.com"></script></head>
+        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connecting to Google...</title><script src="https://cdn.tailwindcss.com"></script></head>
         <body class="bg-[#060911] text-slate-200 min-h-screen flex items-center justify-center p-4 font-sans">
           <div class="max-w-md w-full p-8 rounded-3xl bg-slate-900 border border-blue-500/30 text-center space-y-4 shadow-2xl">
             <div id="spinner" class="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto"></div>
@@ -2060,11 +2050,11 @@ def auth_login(
           <script>
             const timer = setInterval(async () => {{
               try {{
-                const res = await fetch("/api/auth/status?session_id={sid}");
+                const res = await fetch("/api/auth/status?flow_id=${{encodeURIComponent(completion_flow_id)}}");
                 const data = await res.json();
                 if (data.status === "completed" || data.authenticated) {{
                   clearInterval(timer);
-                  window.location.replace("/index.html?session_id={sid}");
+                  window.location.replace("/index.html");
                 }} else if (data.status === "failed") {{
                   clearInterval(timer);
                   document.getElementById("spinner").classList.add("hidden");
@@ -2080,19 +2070,54 @@ def auth_login(
         </html>
         """
         response = HTMLResponse(content=waiting_html)
-        response.set_cookie(key="assistant_session_id", value=sid, httponly=True, secure=_session_cookie_secure(), samesite="lax", path="/", max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600))
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.set_cookie(
+            key="assistant_session_id", value=sid, httponly=True,
+            secure=_session_cookie_secure(), samesite="lax", path="/",
+            max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600)
+        )
         return response
 
+    locked_redirect_uri = get_dynamic_redirect_uri(request)
+    oauth_state = secrets.token_urlsafe(32)
+    flow = build_oauth_flow(request=request, state=oauth_state, redirect_uri=locked_redirect_uri)
+    auth_kwargs: Dict[str, Any] = {
+        "state": oauth_state,
+        "access_type": "offline",
+        "prompt": "consent select_account",
+        "include_granted_scopes": "false",
+    }
+    if email:
+        auth_kwargs["login_hint"] = email.strip().lower()
+
+    auth_url, _ = flow.authorization_url(**auth_kwargs)
+    set_auth_flow(
+        oauth_state,
+        status="pending",
+        session_id=sid,
+        completion_flow_id=str(flow_id or "").strip(),
+        redirect_uri=locked_redirect_uri,
+        code_verifier=flow.code_verifier or "",
+        error=None,
+    )
+
     response = RedirectResponse(auth_url)
-    response.set_cookie(key="assistant_session_id", value=sid, httponly=True, secure=_session_cookie_secure(), samesite="lax", path="/", max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600))
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.set_cookie(
+        key="assistant_session_id", value=sid, httponly=True,
+        secure=_session_cookie_secure(), samesite="lax", path="/",
+        max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600)
+    )
     return response
 
 
 @app.get("/auth/callback")
 @app.get("/api/auth/callback")
 def auth_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
-    session_id = state or get_request_session_id(request) or ""
-    flow_record = get_auth_flow(session_id) if session_id else None
+    oauth_state = str(state or "").strip()
+    flow_record = get_auth_flow(oauth_state) if oauth_state else None
+    session_id = str((flow_record or {}).get("session_id") or "").strip()
+    completion_flow_id = str((flow_record or {}).get("completion_flow_id") or "").strip()
 
     if not session_id or not flow_record:
         return HTMLResponse("Authentication session expired. Please start sign-in again.", status_code=400)
@@ -2101,8 +2126,10 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
         raw_err = error or "missing_code"
         safe_err = html.escape(str(raw_err))
         emit_user_log("ERROR", f"Google authentication failed: {safe_err}")
-        if session_id:
-            set_auth_flow(session_id, status="failed", error=safe_err)
+        if oauth_state:
+            set_auth_flow(oauth_state, status="failed", error=safe_err)
+        if completion_flow_id:
+            set_auth_flow(completion_flow_id, status="failed", error=safe_err)
 
         frontend_url = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
         if frontend_url:
@@ -2197,8 +2224,10 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
         )
 
         clear_account_reauth(clean_user_email)
-        if session_id:
-            set_auth_flow(session_id, status="completed", email=clean_user_email, authenticated_session_id=authenticated_session_id, error=None)
+        if oauth_state:
+            set_auth_flow(oauth_state, status="completed", email=clean_user_email, authenticated_session_id=authenticated_session_id, error=None)
+        if completion_flow_id:
+            set_auth_flow(completion_flow_id, status="completed", email=clean_user_email, authenticated_session_id=authenticated_session_id, error=None)
 
         emit_user_log("SUCCESS", f"Connected account {clean_user_email} to monitoring.")
         focus_desktop_window()
@@ -2238,8 +2267,10 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
         logger.exception("Google account authentication failed.")
         public_err_msg = "Google sign-in could not be completed. Please try again."
         emit_user_log("ERROR", "Google account authentication failed; see server logs for diagnostic details.")
-        if session_id:
-            set_auth_flow(session_id, status="failed", error=public_err_msg)
+        if oauth_state:
+            set_auth_flow(oauth_state, status="failed", error=public_err_msg)
+        if completion_flow_id:
+            set_auth_flow(completion_flow_id, status="failed", error=public_err_msg)
         frontend_url = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
         if frontend_url:
             msg = quote(public_err_msg, safe="")
@@ -2268,10 +2299,14 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
 
 
 @app.get("/api/auth/status")
-def get_auth_status(request: Request, session_id: Optional[str] = None):
-    sid = session_id or get_request_session_id(request)
-    flow = get_auth_flow(sid) if sid else None
-
+def get_auth_status(
+    request: Request,
+    session_id: Optional[str] = None,
+    flow_id: Optional[str] = None,
+):
+    # flow_id is an ephemeral OAuth UI correlation key, never an authenticated session.
+    flow_key = str(flow_id or session_id or "").strip()
+    flow = get_auth_flow(flow_key) if flow_key else None
     if flow:
         return {
             "status": flow.get("status", "pending"),
@@ -2280,6 +2315,7 @@ def get_auth_status(request: Request, session_id: Optional[str] = None):
             "authenticated": flow.get("status") == "completed",
         }
 
+    sid = get_request_session_id(request)
     scoped = get_accounts_for_session(sid)
     if scoped:
         return {"status": "completed", "authenticated": True, "email": scoped[0]["email"], "error": None}

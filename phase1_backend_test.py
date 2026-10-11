@@ -37,10 +37,14 @@ checks={
  'desktop_oauth_reuses_registered_flow':'reuse_registered_flow' in main and 'registered_flow.get("status") == "pending"' in main,
  'desktop_oauth_same_origin':'local_origin = str(request.base_url).rstrip("/")' in main,
  'desktop_oauth_returns_to_cookie_session':'window.location.replace("/index.html");' in main and 'window.location.replace("/index.html?session_id={sid}")' not in main,
- 'launch_browser_reserves_auth_flow':'set_auth_flow(sid, status="pending", redirect_uri=get_dynamic_redirect_uri(request)' in main,
+ 'launch_browser_reserves_auth_flow':'owner_session_id=owner_session_id' in main and 'set_auth_flow(' in main[main.find('def launch_browser_auth'):main.find('@app.get("/auth/login")')],
  'stale_oauth_flow_expires':'time.time() - float(flow.get("timestamp", 0) or 0) > 900' in main,
  'oauth_waiter_handles_idle_status':'data.status === "failed" || data.status === "idle"' in main,
  'temporal_gate_checks_body':'email_body=safe_body' in (ROOT/'backend/services/ai_service.py').read_text(encoding='utf-8'),
+ 'oauth_nonce_separate_from_user_session':'sid = secrets.token_urlsafe(32)' in main[main.find('def auth_login('):main.find('@app.get("/auth/callback")')] and 'owner_session_id = existing_sid if existing_accounts else ""' in main,
+ 'oauth_callback_restores_owner_session':'flow_record.get("owner_session_id")' in main and 'authenticated_session_id = owner_session_id if existing_session_accounts else secrets.token_urlsafe(32)' in main,
+ 'navigation_does_not_put_session_id_in_url':'RedirectResponse(url=f"/index.html?session_id={sid}"' not in main,
+
  'worker_ui_enabled_requires_monitored_account':'any(bool(a.get("is_monitored")) for a in session_accs) and _session_worker_enabled(sid)' in main,
 
 }

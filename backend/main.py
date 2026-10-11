@@ -1973,6 +1973,9 @@ def launch_browser_auth(request: Request, email: Optional[str] = None):
     existing_sid = get_request_session_id(request)
     sid = existing_sid or secrets.token_urlsafe(32)
     hint_param = f"&email={quote(email.strip().lower(), safe='')}" if email else ""
+    # Register the token so /auth/login can bind the browser handoff to it rather
+    # than silently creating a separate state that the caller can never poll.
+    set_auth_flow(sid, status="pending", redirect_uri=get_dynamic_redirect_uri(request), code_verifier="", error=None)
 
     frontend = (getattr(config, "FRONTEND_URL", "") or os.getenv("FRONTEND_URL", "")).strip().rstrip("/")
     is_production = os.getenv("EMA_ENV", "").strip().lower() in {"production", "prod"}
@@ -2006,11 +2009,26 @@ def auth_login(
     browser: Optional[str] = None,
     email: Optional[str] = None,
 ):
-    existing_sid = get_request_session_id(request)
-    existing_accounts = get_accounts_for_session(existing_sid) if existing_sid else []
-    # OAuth state is an ephemeral flow identifier. For a first login, create a fresh server-side session token separately.
-    sid = existing_sid if existing_accounts else secrets.token_urlsafe(32)
-    locked_redirect_uri = get_dynamic_redirect_uri(request)
+    # The desktop/browser handoff starts a flow in the first request, then opens
+    # the same URL with browser=1. Reuse only an unexpired, server-registered
+    # pending flow token; never trust an arbitrary query session ID as OAuth state.
+    requested_sid = str(session_id or "").strip()
+    registered_flow = get_auth_flow(requested_sid) if requested_sid else None
+    reuse_registered_flow = bool(
+        browser == "1"
+        and registered_flow
+        and registered_flow.get("status") == "pending"
+        and time.time() - float(registered_flow.get("timestamp", 0) or 0) <= 900
+    )
+    if reuse_registered_flow:
+        sid = requested_sid
+        locked_redirect_uri = registered_flow.get("redirect_uri") or get_dynamic_redirect_uri(request)
+    else:
+        existing_sid = get_request_session_id(request)
+        existing_accounts = get_accounts_for_session(existing_sid) if existing_sid else []
+        # OAuth state is separate from a newly created authenticated session.
+        sid = existing_sid if existing_accounts else secrets.token_urlsafe(32)
+        locked_redirect_uri = get_dynamic_redirect_uri(request)
 
     flow = build_oauth_flow(request=request, state=sid, redirect_uri=locked_redirect_uri)
 
@@ -2034,8 +2052,9 @@ def auth_login(
     )
 
     if browser != "1":
-        hint_param = f"&email={email.strip().lower()}" if email else ""
-        chrome_target = f"http://127.0.0.1:8000/auth/login?session_id={sid}&browser=1{hint_param}"
+        hint_param = f"&email={quote(email.strip().lower(), safe='')}" if email else ""
+        local_origin = str(request.base_url).rstrip("/")
+        chrome_target = f"{local_origin}/auth/login?session_id={quote(sid, safe='')}&browser=1{hint_param}"
         open_in_chrome_or_default(chrome_target)
 
         waiting_html = f"""
@@ -2057,7 +2076,7 @@ def auth_login(
                 const data = await res.json();
                 if (data.status === "completed" || data.authenticated) {{
                   clearInterval(timer);
-                  window.location.replace("/index.html?session_id={sid}");
+                  window.location.replace("/index.html");
                 }} else if (data.status === "failed") {{
                   clearInterval(timer);
                   document.getElementById("spinner").classList.add("hidden");

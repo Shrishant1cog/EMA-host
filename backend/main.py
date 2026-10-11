@@ -1112,52 +1112,103 @@ def inspect_previous_loop(max_target: int, scoped_accounts: List[Dict[str, Any]]
     INSPECT_STATE["is_running"] = True
     INSPECT_STATE["target_count"] = clamped_target
     INSPECT_STATE["current_count"] = 0
-    INSPECT_STATE["status_message"] = f"Scanning {clamped_target} unprocessed emails..."
-    emit_user_log("INFO", f"Starting historical email scan (target: {clamped_target} emails).")
+    INSPECT_STATE["status_message"] = f"Scanning up to {clamped_target} unprocessed emails..."
+    emit_user_log("INFO", f"Starting historical email scan (target: {clamped_target} successful email(s)).")
+
+    found_unprocessed = 0
+    attempted_failed = 0
+    saw_unprocessed = False
+    scan_errors = 0
 
     try:
         if not scoped_accounts:
             INSPECT_STATE["status_message"] = "No accounts enabled for monitoring."
             return
 
-        found_unprocessed = 0
-
         for acc in scoped_accounts:
             if INSPECT_STATE["stop_event"].is_set() or found_unprocessed >= clamped_target:
                 break
 
-            acc_email = acc["email"].strip().lower()
+            acc_email = str(acc.get("email") or "").strip().lower()
+            if not acc_email:
+                continue
             try:
                 gmail_service, calendar_service = get_google_services_for_account(acc_email)
-                results = gmail_service.users().messages().list(
-                    userId="me",
-                    q="label:INBOX -label:spam -label:trash",
-                    maxResults=25,
-                ).execute()
+                page_token: Optional[str] = None
+                pages_scanned = 0
+                while (
+                    not INSPECT_STATE["stop_event"].is_set()
+                    and found_unprocessed < clamped_target
+                    and pages_scanned < 50
+                ):
+                    query_args: Dict[str, Any] = {
+                        "userId": "me",
+                        "q": "label:INBOX -label:spam -label:trash",
+                        "maxResults": 100,
+                    }
+                    if page_token:
+                        query_args["pageToken"] = page_token
+                    results = gmail_service.users().messages().list(**query_args).execute()
+                    pages_scanned += 1
 
-                for m in results.get("messages", []):
-                    if INSPECT_STATE["stop_event"].is_set() or found_unprocessed >= clamped_target:
+                    for message in results.get("messages", []) or []:
+                        if INSPECT_STATE["stop_event"].is_set() or found_unprocessed >= clamped_target:
+                            break
+                        mid = str(message.get("id") or "").strip()
+                        if not mid or is_email_processed_drive(acc_email, mid):
+                            continue
+
+                        saw_unprocessed = True
+                        INSPECT_STATE["status_message"] = (
+                            f"Analyzing [{acc_email}] email {found_unprocessed + 1} "
+                            f"of {clamped_target}..."
+                        )
+                        try:
+                            succeeded = process_single_email(
+                                gmail_service, calendar_service, acc_email, mid, acc_email
+                            )
+                        except Exception:
+                            logger.exception("Unexpected historical processing failure for %s/%s", acc_email, mid)
+                            succeeded = False
+
+                        if succeeded:
+                            found_unprocessed += 1
+                            INSPECT_STATE["current_count"] = found_unprocessed
+                        else:
+                            attempted_failed += 1
+                            emit_user_log(
+                                "WARN",
+                                f"Historical scan could not finish email {mid} for {acc_email}; leaving it retryable.",
+                            )
+
+                    page_token = results.get("nextPageToken")
+                    if not page_token:
                         break
 
-                    mid = m["id"]
-                    if is_email_processed_drive(acc_email, mid):
-                        continue
-
-                    INSPECT_STATE["status_message"] = f"Analyzing [{acc_email}] email {found_unprocessed + 1} of {clamped_target}..."
-                    process_single_email(gmail_service, calendar_service, acc_email, mid, acc_email)
-                    found_unprocessed += 1
-                    INSPECT_STATE["current_count"] = found_unprocessed
-            except Exception as e:
-                emit_user_log("ERROR", f"Historical scan error on {acc_email}: {str(e)}")
+            except Exception as exc:
+                scan_errors += 1
+                emit_user_log("ERROR", f"Historical scan error on {acc_email}: {exc}")
 
         if INSPECT_STATE["stop_event"].is_set():
-            INSPECT_STATE["status_message"] = f"Stopped. Processed {found_unprocessed} email(s)."
-        elif found_unprocessed == 0:
+            INSPECT_STATE["status_message"] = (
+                f"Stopped. Successfully processed {found_unprocessed}; "
+                f"{attempted_failed} failed attempt(s) remain retryable."
+            )
+        elif not saw_unprocessed and scan_errors == 0:
             INSPECT_STATE["status_message"] = "All inbox emails have already been processed."
             emit_user_log("INFO", "Historical scan completed: No unprocessed emails found.")
+        elif found_unprocessed == 0:
+            INSPECT_STATE["status_message"] = (
+                f"No emails were processed successfully; {attempted_failed} failed attempt(s) "
+                f"and {scan_errors} account scan error(s). Check the error log."
+            )
+            emit_user_log("WARN", INSPECT_STATE["status_message"])
         else:
-            INSPECT_STATE["status_message"] = f"Complete! Processed {found_unprocessed} email(s)."
-            emit_user_log("SUCCESS", f"Historical scan finished. Processed {found_unprocessed} email(s).")
+            INSPECT_STATE["status_message"] = (
+                f"Complete. Successfully processed {found_unprocessed} email(s); "
+                f"{attempted_failed} failed attempt(s) remain retryable."
+            )
+            emit_user_log("SUCCESS", INSPECT_STATE["status_message"])
     finally:
         INSPECT_STATE["is_running"] = False
         INSPECT_STATE["owner_session"] = None

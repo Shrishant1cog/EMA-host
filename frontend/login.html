@@ -16,13 +16,13 @@
     // Universal Fetch Interceptor: Works on Netlify static hosting without backend script injection
     (function() {
       const urlParams = new URLSearchParams(window.location.search);
-      // Production web sessions use a persisted opaque session ID in localStorage plus the server-side session record. The browser cookie is a convenience fallback.
+      // The browser uses an HttpOnly session cookie. JavaScript never reads the bearer token.
 
       const _origFetch = window.fetch;
       window.fetch = function(input, init) {
         init = init || {};
         init.headers = init.headers || {};
-        // Persisted localStorage session ID is the source of truth for the Netlify-hosted SPA; the backend validates it server-side.
+        // Legacy localStorage session IDs are removed on login; new sessions use HttpOnly cookies.
         init.credentials = "include";
         return _origFetch(input, init);
       };

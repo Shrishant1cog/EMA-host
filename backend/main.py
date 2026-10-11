@@ -561,6 +561,7 @@ def health_check():
         "credential_encryption": encryption_configured,
         "ai_provider": ai_configured or not production_mode,
         "secure_session_cookie": bool(getattr(config, "SESSION_SECURE_COOKIE", False)) or not production_mode,
+        "admin_credentials": bool(_get_admin_username() and _get_admin_password_hash()) or not production_mode,
     }
     ready = all(checks.values())
     payload = {

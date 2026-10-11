@@ -202,6 +202,10 @@ with tempfile.TemporaryDirectory() as temp_dir:
         migrated = drive_state_adapter._load_local_shadow(first_email)
         assert migrated and migrated['settings']['spam_threshold'] == '35', 'Owner-marked legacy shadow did not migrate'
         assert drive_state_adapter._get_shadow_path(first_email).exists(), 'Collision-resistant shadow was not written'
+        if os.name == 'posix':
+            assert (drive_state_adapter._get_shadow_path(first_email).stat().st_mode & 0o777) == 0o600, 'Local state shadow permissions are too broad'
+        saved_shadow = json.loads(drive_state_adapter._get_shadow_path(first_email).read_text(encoding='utf-8'))
+        assert saved_shadow.get('_shadow_account_email') == first_email, 'Shadow owner marker is missing'
         assert drive_state_adapter._load_local_shadow(second_email) is None, 'Legacy shadow from a different email was loaded'
     finally:
         drive_state_adapter.BASE_DIR = old_base_dir

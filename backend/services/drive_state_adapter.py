@@ -3,6 +3,7 @@ import json
 import copy
 import hashlib
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
@@ -135,13 +136,26 @@ def _save_local_shadow(email: str, state: Dict[str, Any]):
     if not clean_email or not isinstance(state, dict):
         return
     path = _get_shadow_path(clean_email)
+    # Use a per-process/thread temporary file and atomic replace so a crash or
+    # concurrent save cannot leave a half-written history snapshot.
+    temp_path = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         payload = dict(state)
         payload["_shadow_account_email"] = clean_email
-        with open(path, "w", encoding="utf-8") as f:
+        descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as f:
             json.dump(payload, f, separators=(',', ':'))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, path)
+        if os.name == "posix":
+            os.chmod(path, 0o600)
     except Exception as e:
         logger.debug(f"Shadow save error for {clean_email}: {e}")
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _get_or_create_state_file_id(drive_service, email: str) -> str:

@@ -573,7 +573,7 @@ def _process_single_email_unlocked(
         subject = email_data.get("subject", "No Subject")
         sender = email_data.get("sender", "Unknown")
 
-        emit_user_log("INFO", f"Analyzing email from {sender} — '{subject}' [{clean_acc_email}]")
+        emit_user_log("INFO", f"Analyzing email from {sender}: '{subject}' [{clean_acc_email}]")
 
         spam_threshold_pct = int(get_drive_setting(clean_acc_email, "spam_threshold", "50"))
         spam_threshold_ratio = spam_threshold_pct / 100.0
@@ -713,7 +713,7 @@ def _process_single_email_unlocked(
             emit_user_log("FILTER", f"Organized newsletter/marketing email: '{subject}'")
         else:
             status = "PROCESSED"
-            emit_user_log("INFO", f"Processed email '{subject}' for {clean_acc_email} — No calendar action needed.")
+            emit_user_log("INFO", f"Processed email '{subject}' for {clean_acc_email}: No calendar action needed.")
 
         action_saved = record_email_action_drive(
             account_email=clean_acc_email,

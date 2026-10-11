@@ -1971,11 +1971,19 @@ def launch_browser_auth(request: Request, email: Optional[str] = None):
     return a production auth URL and let the caller navigate there instead.
     """
     existing_sid = get_request_session_id(request)
-    sid = existing_sid or secrets.token_urlsafe(32)
+    existing_accounts = get_accounts_for_session(existing_sid) if existing_sid else []
+    owner_session_id = existing_sid if existing_accounts else ""
+    sid = secrets.token_urlsafe(32)
     hint_param = f"&email={quote(email.strip().lower(), safe='')}" if email else ""
-    # Register the token so /auth/login can bind the browser handoff to it rather
-    # than silently creating a separate state that the caller can never poll.
-    set_auth_flow(sid, status="pending", redirect_uri=get_dynamic_redirect_uri(request), code_verifier="", error=None)
+    # Register a short-lived OAuth nonce separately from the existing user session.
+    set_auth_flow(
+        sid,
+        status="pending",
+        owner_session_id=owner_session_id,
+        redirect_uri=get_dynamic_redirect_uri(request),
+        code_verifier="",
+        error=None,
+    )
 
     frontend = (getattr(config, "FRONTEND_URL", "") or os.getenv("FRONTEND_URL", "")).strip().rstrip("/")
     is_production = os.getenv("EMA_ENV", "").strip().lower() in {"production", "prod"}
@@ -1990,7 +1998,7 @@ def launch_browser_auth(request: Request, email: Optional[str] = None):
     response.headers["Cache-Control"] = "no-store, max-age=0"
     response.set_cookie(
         key="assistant_session_id",
-        value=sid,
+        value=(owner_session_id or sid),
         httponly=True,
         secure=_session_cookie_secure(),
         samesite="lax",
@@ -2022,12 +2030,15 @@ def auth_login(
     )
     if reuse_registered_flow:
         sid = requested_sid
+        owner_session_id = str(registered_flow.get("owner_session_id") or "").strip()
         locked_redirect_uri = registered_flow.get("redirect_uri") or get_dynamic_redirect_uri(request)
     else:
         existing_sid = get_request_session_id(request)
         existing_accounts = get_accounts_for_session(existing_sid) if existing_sid else []
-        # OAuth state is separate from a newly created authenticated session.
-        sid = existing_sid if existing_accounts else secrets.token_urlsafe(32)
+        owner_session_id = existing_sid if existing_accounts else ""
+        # OAuth state is always a fresh, short-lived flow nonce, never the user's
+        # durable authenticated session token.
+        sid = secrets.token_urlsafe(32)
         locked_redirect_uri = get_dynamic_redirect_uri(request)
 
     flow = build_oauth_flow(request=request, state=sid, redirect_uri=locked_redirect_uri)
@@ -2046,6 +2057,7 @@ def auth_login(
     set_auth_flow(
         sid,
         status="pending",
+        owner_session_id=owner_session_id,
         redirect_uri=locked_redirect_uri,
         code_verifier=flow.code_verifier or "",
         error=None,
@@ -2092,11 +2104,11 @@ def auth_login(
         </html>
         """
         response = HTMLResponse(content=waiting_html)
-        response.set_cookie(key="assistant_session_id", value=sid, httponly=True, secure=_session_cookie_secure(), samesite="lax", path="/", max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600))
+        response.set_cookie(key="assistant_session_id", value=(owner_session_id or sid), httponly=True, secure=_session_cookie_secure(), samesite="lax", path="/", max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600))
         return response
 
     response = RedirectResponse(auth_url)
-    response.set_cookie(key="assistant_session_id", value=sid, httponly=True, secure=_session_cookie_secure(), samesite="lax", path="/", max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600))
+    response.set_cookie(key="assistant_session_id", value=(owner_session_id or sid), httponly=True, secure=_session_cookie_secure(), samesite="lax", path="/", max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600))
     return response
 
 
@@ -2180,8 +2192,9 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
         if not clean_user_email or "@" not in clean_user_email:
             raise ValueError("Google did not return a valid verified email address.")
 
-        existing_session_accounts = get_accounts_for_session(session_id)
-        authenticated_session_id = session_id if existing_session_accounts else secrets.token_urlsafe(32)
+        owner_session_id = str(flow_record.get("owner_session_id") or "").strip()
+        existing_session_accounts = get_accounts_for_session(owner_session_id) if owner_session_id else []
+        authenticated_session_id = owner_session_id if existing_session_accounts else secrets.token_urlsafe(32)
         if not existing_session_accounts and not create_user_session(authenticated_session_id):
             raise RuntimeError("Could not initialize secure user session.")
 

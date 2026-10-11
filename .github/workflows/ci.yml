@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - fix/ema-audit-remediation
+      - EMA-2.0.1
   pull_request:
     branches:
       - main

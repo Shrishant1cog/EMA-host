@@ -31,8 +31,13 @@ def make_html(path: Path) -> str:
     if path.name == "index.html":
         s = s.replace('<link rel="stylesheet" href="/ux-pro.css">', '<style>' + (ROOT / 'frontend/ux-pro.css').read_text() + '</style>')
         s = s.replace('<script src="/ux-pro.js"></script>', '<script>' + (ROOT / 'frontend/ux-pro.js').read_text() + '</script>')
-    s = re.sub(r'<link[^>]+fonts\.googleapis\.com[^>]*>', '', s)
-    return STORAGE_STUB + API_STUB + '<style>.hidden{display:none!important}</style>' + s
+    s = re.sub(r'<link[^>]+fonts\\.googleapis\\.com[^>]*>', '', s)
+    s = s.replace('  <link rel="icon" type="image/x-icon" href="/favicon.ico" />', '')
+    injected = STORAGE_STUB + API_STUB + '<style>.hidden{display:none!important}</style>'
+    # Inject stubs inside head so the browser stays in standards mode.
+    if '<head>' in s:
+        return s.replace('<head>', '<head>' + injected, 1)
+    return injected + s
 
 
 def check_page(page, width: int, height: int, label: str) -> None:

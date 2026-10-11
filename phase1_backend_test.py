@@ -15,6 +15,7 @@ checks={
  'inspect_owner':'INSPECT_STATE["owner_session"] = sid' in main and 'This inspection belongs to another session' in main,
  'safe_get_logout':'GET is safe' in main and 'delete_google_account' not in main[main.find('def auth_logout_get'):main.find('def auth_logout(request: Request)')],
  'secure_admin':'/api/admin/auth/login' in main and 'httponly=True' in main and 'samesite="strict"' in main,
+ 'admin_auth_endpoints_present': all(name in main for name in ('def admin_auth_login(', 'def admin_auth_me(', 'def admin_auth_logout(')),
  'admin_ai_status':'/api/admin/ai/status' in main,
  'memory_telemetry':'psutil.Process(os.getpid()).memory_info().rss' in main,
  'cors_narrowed':'allow_methods=["GET", "POST", "OPTIONS"]' in main,

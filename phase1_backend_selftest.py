@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json, os, sys, types, tempfile, pathlib, importlib.util
+from datetime import datetime, timedelta, timezone
 
 ROOT=pathlib.Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT))
@@ -119,6 +120,44 @@ with tempfile.TemporaryDirectory() as temp_dir:
         pref_key = f"worker_enabled:{state_tracker._session_hash(sid)}"
         row = conn.execute("SELECT value FROM system_settings WHERE key = ?", (pref_key,)).fetchone()
         assert row is None, "logout left a persisted worker preference behind"
+    finally:
+        conn.close()
+
+# Expired sessions linked to accounts must not be recreated by legacy migration.
+with tempfile.TemporaryDirectory() as temp_dir:
+    test_db = pathlib.Path(temp_dir) / 'expired-session.db'
+    state_tracker.init_db(test_db, force=True)
+    sid = 'session-expired-regression-123456789'
+    assert state_tracker.create_user_session(sid, db_path=test_db)
+    state_tracker.upsert_google_account(
+        email='expiry@example.com',
+        name='Expiry test',
+        picture='',
+        token_data='',
+        session_id=sid,
+        db_path=test_db,
+    )
+    conn = state_tracker.get_db_connection(test_db)
+    try:
+        past = (datetime.now(timezone.utc) - timedelta(seconds=60)).replace(tzinfo=None).isoformat()
+        conn.execute(
+            'UPDATE user_sessions SET expires_at = ? WHERE session_hash = ?',
+            (past, state_tracker._session_hash(sid)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    assert not state_tracker.is_user_session_valid(sid, db_path=test_db)
+    assert not state_tracker.ensure_legacy_session(sid, db_path=test_db), \\
+        'Expired session was revived by legacy migration'
+    conn = state_tracker.get_db_connection(test_db)
+    try:
+        row = conn.execute(
+            'SELECT expires_at FROM user_sessions WHERE session_hash = ?',
+            (state_tracker._session_hash(sid),),
+        ).fetchone()
+        assert row is not None, 'Expired session marker was deleted while an account still references it'
+        assert datetime.fromisoformat(row['expires_at']) <= datetime.now(timezone.utc).replace(tzinfo=None)
     finally:
         conn.close()
 

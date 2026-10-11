@@ -101,6 +101,27 @@ with tempfile.TemporaryDirectory() as temp_dir:
     finally:
         conn.close()
 
+# Per-session worker preferences survive process restarts and disappear on logout.
+with tempfile.TemporaryDirectory() as temp_dir:
+    test_db = pathlib.Path(temp_dir) / 'worker-preferences.db'
+    state_tracker.init_db(test_db, force=True)
+    sid = 'session-worker-test-123456789'
+    assert state_tracker.create_user_session(sid, db_path=test_db)
+    assert state_tracker.is_user_session_worker_enabled(sid, db_path=test_db) is True
+    assert state_tracker.set_user_session_worker_enabled(sid, False, db_path=test_db)
+    assert state_tracker.is_user_session_worker_enabled(sid, db_path=test_db) is False
+    assert state_tracker.count_active_user_sessions(300, db_path=test_db) == 1
+    assert state_tracker.set_user_session_worker_enabled(sid, True, db_path=test_db)
+    assert state_tracker.is_user_session_worker_enabled(sid, db_path=test_db) is True
+    state_tracker.revoke_user_session(sid, db_path=test_db)
+    conn = state_tracker.get_db_connection(test_db)
+    try:
+        pref_key = f"worker_enabled:{state_tracker._session_hash(sid)}"
+        row = conn.execute("SELECT value FROM system_settings WHERE key = ?", (pref_key,)).fetchone()
+        assert row is None, "logout left a persisted worker preference behind"
+    finally:
+        conn.close()
+
 # Token encryption round trip with an isolated temporary key.
 try:
     from cryptography.fernet import Fernet

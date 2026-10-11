@@ -295,7 +295,26 @@ def set_auth_flow(sid: str, **kwargs):
 
 def get_auth_flow(sid: str) -> Optional[Dict[str, Any]]:
     with _AUTH_LOCK:
-        return _AUTH_FLOWS.get(sid)
+        flow = _AUTH_FLOWS.get(sid)
+        return dict(flow) if flow else None
+
+
+def consume_auth_bootstrap_flow(flow_id: str) -> Optional[Dict[str, Any]]:
+    """Atomically consume a browser-visible OAuth bootstrap ID exactly once."""
+    key = str(flow_id or "").strip()
+    if not key:
+        return None
+    now = time.time()
+    with _AUTH_LOCK:
+        flow = _AUTH_FLOWS.get(key)
+        if not flow or now - float(flow.get("timestamp", 0)) > 900:
+            _AUTH_FLOWS.pop(key, None)
+            return None
+        if flow.get("bootstrap_consumed") or flow.get("status") != "pending":
+            return None
+        flow["bootstrap_consumed"] = True
+        flow["timestamp"] = now
+        return dict(flow)
 
 
 def open_in_chrome_or_default(url: str) -> bool:
@@ -2188,7 +2207,14 @@ def auth_login(
     supplied_sid = str(session_id or "").strip()
     if len(supplied_sid) > 256 or any(ord(ch) < 32 for ch in supplied_sid):
         supplied_sid = ""
-    bootstrap_flow = get_auth_flow(str(flow_id or "").strip()) if flow_id else None
+    flow_key = str(flow_id or "").strip()
+    bootstrap_flow = consume_auth_bootstrap_flow(flow_key) if flow_key else None
+    if flow_key and not bootstrap_flow and not existing_accounts:
+        return HTMLResponse(
+            "This sign-in link has expired or was already used. Please start Google sign-in again.",
+            status_code=400,
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
     bootstrap_sid = str((bootstrap_flow or {}).get("session_id") or "").strip()
     # The browser sees only the opaque flow ID. Resolve its candidate session from
     # this server-side record; OAuth state itself remains a separate random token.
@@ -2291,6 +2317,12 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
 
     if not session_id or not flow_record:
         return HTMLResponse("Authentication session expired. Please start sign-in again.", status_code=400)
+    if flow_record.get("status") != "pending":
+        return HTMLResponse(
+            "This Google sign-in callback has already been used. Please start sign-in again if needed.",
+            status_code=400,
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
 
     if error or not code:
         raw_err = error or "missing_code"

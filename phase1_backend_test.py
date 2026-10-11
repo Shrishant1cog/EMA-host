@@ -28,6 +28,11 @@ checks={
  'gmail_query_errors_propagate':'raise_errors=True' in main and 'len(msg_ids) < EMAIL_BATCH_SIZE' in main,
  'stable_initial_backfill_cursor':'set_drive_setting(acc_email, "last_sync_epoch", str(epoch_cutoff))' in main,
  'batch_settings_persist_together':'set_drive_settings' in main,
+ 'worker_preference_persisted':'set_user_session_worker_enabled' in main and 'is_user_session_worker_enabled' in main,
+ 'worker_rejects_unscoped_legacy_accounts':'if a.get("session_id") and _session_worker_enabled(a.get("session_id"))' in main,
+ 'admin_active_sessions_durable':'count_active_user_sessions(window_seconds=300)' in main,
+ 'admin_health_status_present':'"status": "ok" if ram >= 0 else "degraded"' in main,
+
 }
 for k,v in checks.items():
     if not v: fail.append(k)

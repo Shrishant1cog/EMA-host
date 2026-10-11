@@ -123,6 +123,8 @@ except Exception as exc:
 
 _AUTH_LOCK = threading.RLock()
 _AUTH_FLOWS: Dict[str, Dict[str, Any]] = {}
+_AUTH_TRANSFER_TICKETS: Dict[str, Dict[str, Any]] = {}
+_AUTH_TRANSFER_TICKET_TTL_SECONDS = 120
 CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 
@@ -335,6 +337,50 @@ def consume_auth_bootstrap_flow(flow_id: str) -> Optional[Dict[str, Any]]:
         flow["bootstrap_consumed"] = True
         flow["timestamp"] = now
         return dict(flow)
+
+
+def _create_auth_transfer_ticket(session_id: str, email: str) -> str:
+    """Create a short-lived opaque ticket that can be exchanged once for an HttpOnly cookie."""
+    sid = str(session_id or "").strip()
+    clean_email = str(email or "").strip().lower()
+    if not sid or not clean_email:
+        raise ValueError("Cannot create an auth transfer ticket without an authenticated session.")
+    raw_ticket = secrets.token_urlsafe(32)
+    digest = hashlib.sha256(raw_ticket.encode("utf-8")).hexdigest()
+    now = time.time()
+    with _AUTH_LOCK:
+        expired = [
+            key for key, item in _AUTH_TRANSFER_TICKETS.items()
+            if float(item.get("expires_at", 0)) <= now
+        ]
+        for key in expired:
+            _AUTH_TRANSFER_TICKETS.pop(key, None)
+        if len(_AUTH_TRANSFER_TICKETS) >= 1024:
+            oldest = sorted(
+                _AUTH_TRANSFER_TICKETS.items(),
+                key=lambda pair: float(pair[1].get("expires_at", 0)),
+            )[: len(_AUTH_TRANSFER_TICKETS) - 900]
+            for key, _ in oldest:
+                _AUTH_TRANSFER_TICKETS.pop(key, None)
+        _AUTH_TRANSFER_TICKETS[digest] = {
+            "session_id": sid,
+            "email": clean_email,
+            "expires_at": now + _AUTH_TRANSFER_TICKET_TTL_SECONDS,
+        }
+    return raw_ticket
+
+
+def _consume_auth_transfer_ticket(raw_ticket: str) -> Optional[Dict[str, Any]]:
+    ticket = str(raw_ticket or "").strip()
+    if not ticket or len(ticket) > 256:
+        return None
+    digest = hashlib.sha256(ticket.encode("utf-8")).hexdigest()
+    now = time.time()
+    with _AUTH_LOCK:
+        item = _AUTH_TRANSFER_TICKETS.pop(digest, None)
+        if not item or float(item.get("expires_at", 0)) <= now:
+            return None
+        return dict(item)
 
 
 def open_in_chrome_or_default(url: str) -> bool:
@@ -2554,12 +2600,24 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
         """
         frontend_url = (getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
         if frontend_url:
-            redirect_url = f"{frontend_url}/index.html#ema_session={quote(authenticated_session_id, safe='')}"
+            transfer_ticket = _create_auth_transfer_ticket(authenticated_session_id, clean_user_email)
+            redirect_url = f"{frontend_url}/index.html#ema_ticket={quote(transfer_ticket, safe='')}"
             response = RedirectResponse(url=redirect_url, status_code=303)
             response.headers["Cache-Control"] = "no-store, max-age=0"
+            response.headers["Referrer-Policy"] = "no-referrer"
         else:
+            # Local/fallback mode can retain the HttpOnly cookie directly because
+            # the dashboard is served from this same origin.
             response = HTMLResponse(content=html_content, headers={"Cache-Control": "no-store, max-age=0"})
-        response.set_cookie(key="assistant_session_id", value=authenticated_session_id, httponly=True, secure=_session_cookie_secure(), samesite="lax", path="/", max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600))
+            response.set_cookie(
+                key="assistant_session_id",
+                value=authenticated_session_id,
+                httponly=True,
+                secure=_session_cookie_secure(),
+                samesite="lax",
+                path="/",
+                max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600),
+            )
         return response
 
     except Exception as e:
@@ -2620,6 +2678,47 @@ def get_auth_status(
         return {"status": "completed", "authenticated": True, "email": scoped[0]["email"], "error": None}
 
     return {"status": "idle", "authenticated": False, "error": None}
+
+
+class AuthTransferPayload(BaseModel):
+    ticket: str
+
+
+@app.post("/api/auth/exchange")
+def exchange_auth_transfer_ticket(payload: AuthTransferPayload, request: Request):
+    """Exchange a URL-fragment ticket for an HttpOnly cookie without exposing the session ID."""
+    frontend_url = str(getattr(config, "FRONTEND_URL", "") or "").rstrip("/")
+    expected = urlparse(frontend_url)
+    expected_origin = f"{expected.scheme}://{expected.netloc}" if expected.scheme and expected.netloc else ""
+    supplied_origin = str(request.headers.get("origin") or "").strip().rstrip("/")
+    if not expected_origin or not supplied_origin or not hmac.compare_digest(supplied_origin, expected_origin):
+        raise HTTPException(status_code=403, detail="Invalid authentication transfer origin.")
+
+    transfer = _consume_auth_transfer_ticket(payload.ticket)
+    if not transfer:
+        raise HTTPException(status_code=401, detail="Authentication transfer ticket expired or already used.")
+
+    sid = str(transfer.get("session_id") or "").strip()
+    clean_email = str(transfer.get("email") or "").strip().lower()
+    if not sid or not is_user_session_valid(sid):
+        raise HTTPException(status_code=401, detail="Authenticated session expired. Please sign in again.")
+    if not verify_account_ownership(clean_email, sid):
+        raise HTTPException(status_code=401, detail="Authenticated account is no longer associated with this session.")
+
+    response = JSONResponse({"authenticated": True, "email": clean_email})
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.set_cookie(
+        key="assistant_session_id",
+        value=sid,
+        httponly=True,
+        secure=_session_cookie_secure(),
+        samesite="lax",
+        path="/",
+        max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600),
+    )
+    return response
+
+
 
 
 def _clear_session_cookie(response: Response):

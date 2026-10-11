@@ -41,6 +41,13 @@ def _get_fernet():
         return None
 
 
+def token_encryption_ready() -> bool:
+    """Report whether required at-rest token encryption is usable, not just configured."""
+    if not getattr(config, "TOKEN_ENCRYPTION_REQUIRED", False):
+        return True
+    return _get_fernet() is not None
+
+
 def _encrypt_token_data(value: str) -> str:
     if not value:
         return value

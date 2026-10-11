@@ -2077,12 +2077,12 @@ def auth_login(
                 if (data.status === "completed" || data.authenticated) {{
                   clearInterval(timer);
                   window.location.replace("/index.html");
-                }} else if (data.status === "failed") {{
+                }} else if (data.status === "failed" || data.status === "idle") {{
                   clearInterval(timer);
                   document.getElementById("spinner").classList.add("hidden");
                   document.getElementById("heading").innerText = "Sign-In Failed";
                   const errBox = document.getElementById("error-box");
-                  errBox.innerText = data.error || "Authentication denied";
+                  errBox.innerText = data.error || (data.status === "idle" ? "Authentication session expired. Please start sign-in again." : "Authentication denied");
                   errBox.classList.remove("hidden");
                 }}
               }} catch (e) {{}}
@@ -2283,6 +2283,13 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
 def get_auth_status(request: Request, session_id: Optional[str] = None):
     sid = session_id or get_request_session_id(request)
     flow = get_auth_flow(sid) if sid else None
+
+    if flow and time.time() - float(flow.get("timestamp", 0) or 0) > 900:
+        # Expire the waiting flow explicitly so browser handoff clients can stop
+        # polling instead of remaining stuck on a permanently pending state.
+        with _AUTH_LOCK:
+            _AUTH_FLOWS.pop(sid, None)
+        flow = None
 
     if flow:
         return {

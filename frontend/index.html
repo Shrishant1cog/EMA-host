@@ -1236,7 +1236,7 @@
             </div>
             <div>
               <label class="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5 font-mono">Control</label>
-              <button id="btn-inspect-toggle" onclick="toggleInspect()" class="btn-action w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-indigo-600/30">
+              <button id="btn-inspect-toggle" onclick="toggleInspect()" class="btn-action w-full py-2.5 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs flex items-center justify-center gap-2 border border-white/10">
                 <i id="inspect-icon" data-lucide="play" class="w-4 h-4"></i>
                 <span id="inspect-btn-label">Start Scan</span>
               </button>
@@ -1610,7 +1610,7 @@
 
       const activeBtn = document.getElementById('btn-' + tabId);
       if (activeBtn) {
-        activeBtn.className = "nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-lg shadow-indigo-600/30";
+        activeBtn.className = "nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-slate-800 text-white border border-white/10";
         activeBtn.setAttribute('aria-selected', 'true');
       }
 

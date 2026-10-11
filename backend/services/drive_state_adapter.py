@@ -5,6 +5,7 @@ import hashlib
 import logging
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
 
@@ -347,6 +348,24 @@ def commit_drive_state(email: str) -> bool:
             logger.warning(f"Could not commit state to Google Drive for {clean_email}: {e}")
             return False
 
+def is_email_retry_deferred_drive(email: str, email_id: str, now_epoch: Optional[float] = None) -> bool:
+    """Avoid retrying the same failed unread message every worker tick."""
+    if not email or not str(email).strip():
+        return False
+    clean_email = str(email).strip().lower()
+    mid = str(email_id)
+    state = load_drive_state(clean_email)
+    now_value = float(now_epoch if now_epoch is not None else time.time())
+    with _CACHE_LOCK:
+        retry_map = state.get("failed_email_retry_after", {})
+        if not isinstance(retry_map, dict):
+            return False
+        try:
+            return float(retry_map.get(mid, 0) or 0) > now_value
+        except (TypeError, ValueError):
+            return False
+
+
 def is_email_processed_drive(email: str, email_id: str) -> bool:
     if not email or not email.strip():
         return False
@@ -389,6 +408,18 @@ def record_email_action_drive(account_email: str, action_data: Dict[str, Any]):
             return "processed"
 
         new_status = str(action_data.get("status", "PROCESSED")).upper()
+        retry_map = state.setdefault("failed_email_retry_after", {})
+        if not isinstance(retry_map, dict):
+            retry_map = {}
+            state["failed_email_retry_after"] = retry_map
+        if mid and new_status == "FAILED":
+            retry_map[mid] = int(time.time()) + 300
+        elif mid:
+            retry_map.pop(mid, None)
+        if len(retry_map) > _PROCESSED_ID_LIMIT:
+            state["failed_email_retry_after"] = dict(
+                sorted(retry_map.items(), key=lambda item: float(item[1] or 0), reverse=True)[:_PROCESSED_ID_LIMIT]
+            )
         existing_idx = next((i for i, a in enumerate(actions) if str(a.get("email_id")) == mid), None)
         if existing_idx is None:
             actions.insert(0, action_data)
@@ -440,6 +471,13 @@ def record_email_action_drive(account_email: str, action_data: Dict[str, Any]):
         if mid:
             failed_ids.append(mid)
         state["failed_email_ids"] = failed_ids[-_PROCESSED_ID_LIMIT:]
+        retry_map = state.setdefault("failed_email_retry_after", {})
+        if isinstance(retry_map, dict) and mid:
+            retry_map[mid] = int(time.time()) + 300
+            if len(retry_map) > _PROCESSED_ID_LIMIT:
+                state["failed_email_retry_after"] = dict(
+                    sorted(retry_map.items(), key=lambda item: float(item[1] or 0), reverse=True)[:_PROCESSED_ID_LIMIT]
+                )
         _PROCESSED_CACHE.setdefault(clean_email, set()).discard(mid)
         snapshot = copy.deepcopy(state)
     _save_local_shadow(clean_email, snapshot)

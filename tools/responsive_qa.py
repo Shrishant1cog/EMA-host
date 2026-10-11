@@ -26,8 +26,6 @@ window.lucide={createIcons(){}};HTMLMediaElement.prototype.play=function(){this.
 
 def make_html(path: Path) -> str:
     s = path.read_text(encoding="utf-8")
-    s = s.replace('<script src="https://cdn.tailwindcss.com"></script>', '<script>window.tailwind={config:{}};</script>')
-    s = s.replace('<script defer src="https://cdn.tailwindcss.com"></script>', '<script>window.tailwind={config:{}};</script>')
     s = s.replace('<script src="https://unpkg.com/lucide@latest"></script>', '<script>window.lucide={createIcons(){}};</script>')
     s = s.replace('<script defer src="https://unpkg.com/lucide@latest"></script>', '<script>window.lucide={createIcons(){}};</script>')
     if path.name == "index.html":
@@ -53,7 +51,7 @@ def check_page(page, width: int, height: int, label: str) -> None:
     if visible_overflow: FAILURES.append(f'{label}: overflowing visible controls {visible_overflow}')
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True, executable_path='/usr/bin/chromium', args=['--no-sandbox','--disable-gpu'])
+    browser = p.chromium.launch(headless=True, args=['--no-sandbox','--disable-gpu'])
     for width,height in [(320,568),(360,800),(390,844),(430,932),(768,1024),(1024,768),(1440,900),(1920,1080)]:
         page=browser.new_page(viewport={'width':width,'height':height})
         check_page(page,width,height,f'user_{width}x{height}')

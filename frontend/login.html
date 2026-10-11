@@ -242,7 +242,10 @@
     const IS_LOCAL_EMA = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
     const BACKEND_URL = IS_LOCAL_EMA ? "http://127.0.0.1:8000" : "";
     const SESSION_KEY = "ema_session_id";
-    const getSessionId = () => { try { return localStorage.getItem(SESSION_KEY) || ""; } catch (_) { return ""; } };
+    const getSessionId = () => "";
+    const clearSessionId = () => { try { localStorage.removeItem(SESSION_KEY); } catch (_) {} };
+    // Remove legacy JavaScript-readable bearer tokens. New sessions use HttpOnly cookies.
+    clearSessionId();
     async function checkExistingAuth() {
       const btn = document.getElementById('btn-google-login');
       try {

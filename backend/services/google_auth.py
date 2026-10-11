@@ -172,28 +172,9 @@ def get_credentials_for_account(email: str) -> Optional[Credentials]:
             client_secret = data.get("client_secret") or getattr(config, "GOOGLE_CLIENT_SECRET", "").strip()
             scopes = data.get("scopes") or SCOPES
 
-            # Legacy fallback: borrow refresh token only when the account does not have one.
-            # Never persist client_secret/client_id in the per-account token blob.
-            if not refresh_token and TOKEN_PATH.exists():
-                try:
-                    with open(TOKEN_PATH, "r", encoding="utf-8") as f:
-                        legacy_data = json.load(f)
-                    refresh_token = legacy_data.get("refresh_token")
-                    if refresh_token:
-                        data["refresh_token"] = refresh_token
-                        clean_data = dict(data)
-                        clean_data.pop("client_id", None)
-                        clean_data.pop("client_secret", None)
-                        upsert_google_account(
-                            email=clean_email,
-                            name=acc.get("name") or clean_email,
-                            picture=acc.get("picture") or "",
-                            token_data=json.dumps(clean_data),
-                            session_id=acc.get("session_id"),
-                            is_monitored=acc.get("is_monitored", 1),
-                        )
-                except Exception as legacy_err:
-                    logger.debug(f"Legacy refresh-token fallback skipped for {clean_email}: {legacy_err}")
+            # Never borrow a refresh token from the global legacy token file here.
+            # It may belong to a different Google identity; auto_migrate_legacy_token()
+            # is the only migration path and binds credentials to their verified email.
 
             creds = Credentials(
                 token=token,
@@ -212,7 +193,11 @@ def get_credentials_for_account(email: str) -> Optional[Credentials]:
                 except Exception:
                     pass
 
-            if (creds.expired or not creds.valid) and creds.refresh_token:
+            if creds.expired or not creds.valid:
+                if not creds.refresh_token:
+                    logger.warning("Google credentials for %s are invalid or expired and have no account-specific refresh token.", clean_email)
+                    mark_account_needs_reauth(clean_email)
+                    return None
                 try:
                     creds.refresh(Request())
                 except RefreshError as refresh_err:

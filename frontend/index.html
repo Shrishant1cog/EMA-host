@@ -1748,13 +1748,13 @@
             const hasFiles = desc.includes("drive.google.com") || desc.includes("Attachment:") || (ev.attachments && ev.attachments.length > 0);
 
             htmlOut += `
-              <div id="event-card-${ev.id}" onclick="onEventCardClick('${ev.id}')" class="calendar-event-item glass-card p-4 rounded-2xl space-y-2.5 border cursor-pointer ${isAssistant ? 'border-indigo-500/40 bg-indigo-950/20' : 'border-white/10'}">
+              <div data-event-card-id="${escapeHtml(ev.id)}" class="calendar-event-item glass-card p-4 rounded-2xl space-y-2.5 border cursor-pointer ${isAssistant ? 'border-indigo-500/40 bg-indigo-950/20' : 'border-white/10'}">
                 <div class="flex justify-between items-start gap-2">
                   <div class="flex items-center gap-2.5 overflow-hidden">
                     <span class="px-2 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 font-mono text-[10px] font-bold shrink-0">${timeStr}</span>
                     <h5 class="text-xs font-bold text-white truncate">${escapeHtml(ev.summary || 'Scheduled Event')}</h5>
                   </div>
-                  <button onclick="event.stopPropagation(); openEventDetailModal('${ev.id}')" class="text-cyan-400 hover:text-white p-1 shrink-0 transition" title="View Details / Edit">
+                  <button type="button" data-event-detail-id="${escapeHtml(ev.id)}" class="text-cyan-400 hover:text-white p-1 shrink-0 transition" title="View Details / Edit">
                     <i data-lucide="info" class="w-3.5 h-3.5"></i>
                   </button>
                 </div>
@@ -1773,6 +1773,18 @@
         }
 
         container.innerHTML = htmlOut;
+        container.querySelectorAll('[data-event-card-id]').forEach(card => {
+          card.addEventListener('click', event => {
+            if (event.target.closest('[data-event-detail-id]')) return;
+            onEventCardClick(card.dataset.eventCardId || '');
+          });
+        });
+        container.querySelectorAll('[data-event-detail-id]').forEach(button => {
+          button.addEventListener('click', event => {
+            event.stopPropagation();
+            openEventDetailModal(button.dataset.eventDetailId || '');
+          });
+        });
         scheduleIconRefresh();
       } catch (err) {
         container.innerHTML = `<div class="col-span-1 sm:col-span-2 text-xs text-rose-400 py-10 text-center">Failed to load calendar events.</div>`;
@@ -1785,7 +1797,8 @@
       } else {
         activeSelectedEventId = evId;
         document.querySelectorAll('.calendar-event-item').forEach(el => el.classList.remove('selected-event-card'));
-        const card = document.getElementById('event-card-' + evId);
+        const card = Array.from(document.querySelectorAll('[data-event-card-id]'))
+          .find(el => el.dataset.eventCardId === evId);
         if (card) card.classList.add('selected-event-card');
       }
     }
@@ -1806,7 +1819,14 @@
       document.getElementById('event-edit-start').value = startFmt;
       document.getElementById('event-edit-end').value = endFmt;
       document.getElementById('event-edit-location').value = ev.location || '';
-      document.getElementById('btn-open-google-cal').href = ev.htmlLink || '#';
+      const calendarLink = safeHttpUrl(ev.htmlLink);
+      const openCalendarButton = document.getElementById('btn-open-google-cal');
+      openCalendarButton.href = calendarLink || '#';
+      openCalendarButton.target = '_blank';
+      openCalendarButton.rel = 'noopener noreferrer';
+      openCalendarButton.referrerPolicy = 'no-referrer';
+      openCalendarButton.setAttribute('aria-disabled', calendarLink ? 'false' : 'true');
+
 
       // Save baseline for dirty checking (starts disabled)
       originalEventModalData = {

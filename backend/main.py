@@ -72,6 +72,7 @@ from backend.utils.state_tracker import (
 )
 from backend.services.drive_state_adapter import (
     is_email_processed_drive,
+    get_drive_failed_email_ids,
     record_email_action_drive,
     get_drive_stats,
     list_drive_emails,
@@ -758,6 +759,36 @@ def _process_single_email_unlocked(
 # inspector cannot concurrently schedule the same messages for the same inbox.
 _EMAIL_PROCESS_LOCKS_GUARD = threading.RLock()
 _EMAIL_PROCESS_LOCKS: Dict[str, threading.RLock] = {}
+_EMAIL_RETRY_BACKOFF_LOCK = threading.RLock()
+_EMAIL_RETRY_BACKOFF: Dict[Tuple[str, str], Tuple[float, int]] = {}
+
+
+def _get_email_retry_state(account_email: str, message_id: str) -> Tuple[float, int]:
+    key = (str(account_email or "").strip().lower(), str(message_id or ""))
+    with _EMAIL_RETRY_BACKOFF_LOCK:
+        return _EMAIL_RETRY_BACKOFF.get(key, (0.0, 0))
+
+
+def _defer_email_retry(account_email: str, message_id: str) -> int:
+    key = (str(account_email or "").strip().lower(), str(message_id or ""))
+    now = time.time()
+    with _EMAIL_RETRY_BACKOFF_LOCK:
+        attempts = _EMAIL_RETRY_BACKOFF.get(key, (0.0, 0))[1] + 1
+        delay = min(6 * 3600, 30 * (2 ** min(attempts - 1, 12)))
+        _EMAIL_RETRY_BACKOFF[key] = (now + delay, attempts)
+        if len(_EMAIL_RETRY_BACKOFF) > 10000:
+            for old_key, (retry_at, _) in list(_EMAIL_RETRY_BACKOFF.items()):
+                if retry_at <= now:
+                    _EMAIL_RETRY_BACKOFF.pop(old_key, None)
+            while len(_EMAIL_RETRY_BACKOFF) > 9000:
+                _EMAIL_RETRY_BACKOFF.pop(next(iter(_EMAIL_RETRY_BACKOFF)))
+        return delay
+
+
+def _clear_email_retry(account_email: str, message_id: str) -> None:
+    key = (str(account_email or "").strip().lower(), str(message_id or ""))
+    with _EMAIL_RETRY_BACKOFF_LOCK:
+        _EMAIL_RETRY_BACKOFF.pop(key, None)
 
 
 def process_single_email(
@@ -770,6 +801,10 @@ def process_single_email(
     with _EMAIL_PROCESS_LOCKS_GUARD:
         account_lock = _EMAIL_PROCESS_LOCKS.setdefault(clean_account, threading.RLock())
     with account_lock:
+        # The worker and historical inspector can race after their initial list.
+        # Recheck after acquiring the lock before triggering AI or Calendar writes.
+        if is_email_processed_drive(clean_account, str(mid)):
+            return True
         return _process_single_email_unlocked(
             gmail_service, calendar_service, drive_email, mid, clean_account
         )
@@ -836,6 +871,8 @@ def background_worker_loop():
     IDLE_SLEEP = 60
     ACTIVE_SLEEP = 15
     EMAIL_BATCH_SIZE = 5
+    GMAIL_PAGE_SIZE = 100
+    MAX_PAGES_PER_ACCOUNT_TICK = 50
     SYNC_CURSOR_OVERLAP_SECONDS = 120
 
     while not WORKER_STATE["stop_event"].is_set():
@@ -865,11 +902,9 @@ def background_worker_loop():
                 try:
                     last_epoch_str = get_drive_setting(acc_email, "last_sync_epoch", "0")
                     current_epoch = int(time.time())
-
                     if not last_epoch_str or last_epoch_str == "0":
-                        # Establish a stable backfill floor for the initial 24-hour scan.
-                        # This is not the end cursor: the cursor only advances after the
-                        # query is drained and a short, successful page is returned.
+                        # Scan the last 24 hours initially; don't move the cursor until
+                        # the unread query has been drained successfully.
                         epoch_cutoff = current_epoch - (24 * 3600)
                         set_drive_setting(acc_email, "last_sync_epoch", str(epoch_cutoff))
                     else:
@@ -879,43 +914,114 @@ def background_worker_loop():
                             epoch_cutoff = current_epoch - 3600
 
                     gmail_service, calendar_service = get_google_services_for_account(acc_email)
-                    # Use a short look-back window to tolerate provider indexing delays;
-                    # already-processed IDs are deduplicated below.
                     query_cutoff = max(0, epoch_cutoff - SYNC_CURSOR_OVERLAP_SECONDS)
                     query = f"is:unread label:INBOX -label:spam -label:trash after:{query_cutoff}"
-                    msg_ids = get_unprocessed_message_ids(
-                        gmail_service, query=query, max_results=EMAIL_BATCH_SIZE, raise_errors=True
-                    )
 
-                    if msg_ids:
-                        total_new_emails += len(msg_ids)
-                        emit_user_log("INFO", f"Found {len(msg_ids)} new unread email(s) in {acc_email}.")
-
+                    # Retry previously failed IDs separately from inbox discovery. A single
+                    # bad unread message must not pin the Gmail query cursor forever.
+                    candidates: List[str] = []
+                    candidate_ids: set[str] = set()
+                    stale_processed_ids: List[str] = []
                     batch_failed = False
-                    for mid in msg_ids:
-                        if WORKER_STATE["stop_event"].is_set():
+                    now = time.time()
+                    failed_ids = get_drive_failed_email_ids(acc_email, limit=5000)
+                    for failed_id in failed_ids:
+                        if len(candidates) >= EMAIL_BATCH_SIZE or WORKER_STATE["stop_event"].is_set():
                             break
-                        if is_email_processed_drive(acc_email, mid):
-                            # A prior successful processing may have failed only to mark the
-                            # message read. Retry that label cleanup so stale processed messages
-                            # don't permanently occupy every page of the unread query.
-                            try:
-                                gmail_service.users().messages().modify(
-                                    userId="me", id=str(mid), body={"removeLabelIds": ["UNREAD"]}
-                                ).execute()
-                            except Exception as cleanup_err:
-                                emit_user_log("WARN", f"Could not clear UNREAD from already-processed message {mid}: {cleanup_err}")
-                                batch_failed = True
+                        mid = str(failed_id)
+                        retry_at, _ = _get_email_retry_state(acc_email, mid)
+                        if now < retry_at or mid in candidate_ids:
                             continue
+                        if is_email_processed_drive(acc_email, mid):
+                            _clear_email_retry(acc_email, mid)
+                            continue
+                        candidates.append(mid)
+                        candidate_ids.add(mid)
 
-                        if not process_single_email(gmail_service, calendar_service, acc_email, mid, acc_email):
+                    # Page across unread results without changing labels mid-pagination.
+                    # Deferred failures are skipped, allowing later valid messages to proceed.
+                    page_token: Optional[str] = None
+                    query_drained = False
+                    pages_scanned = 0
+                    while (
+                        len(candidates) < EMAIL_BATCH_SIZE
+                        and not WORKER_STATE["stop_event"].is_set()
+                        and pages_scanned < MAX_PAGES_PER_ACCOUNT_TICK
+                    ):
+                        page_args: Dict[str, Any] = {
+                            "userId": "me",
+                            "q": query,
+                            "maxResults": GMAIL_PAGE_SIZE,
+                        }
+                        if page_token:
+                            page_args["pageToken"] = page_token
+                        page = gmail_service.users().messages().list(**page_args).execute()
+                        pages_scanned += 1
+
+                        for message in page.get("messages", []) or []:
+                            mid = str(message.get("id", "")).strip()
+                            if not mid or mid in candidate_ids:
+                                continue
+                            if is_email_processed_drive(acc_email, mid):
+                                stale_processed_ids.append(mid)
+                                continue
+                            retry_at, _ = _get_email_retry_state(acc_email, mid)
+                            if now < retry_at:
+                                continue
+                            candidates.append(mid)
+                            candidate_ids.add(mid)
+                            if len(candidates) >= EMAIL_BATCH_SIZE:
+                                break
+
+                        page_token = page.get("nextPageToken")
+                        if not page_token:
+                            query_drained = True
+                            break
+
+                    # Only mutate Gmail labels after listing stops, otherwise page tokens can
+                    # shift as unread messages disappear from the search results.
+                    for stale_id in dict.fromkeys(stale_processed_ids):
+                        try:
+                            gmail_service.users().messages().modify(
+                                userId="me", id=stale_id, body={"removeLabelIds": ["UNREAD"]}
+                            ).execute()
+                        except Exception as cleanup_err:
+                            emit_user_log(
+                                "WARN",
+                                f"Could not clear UNREAD from already-processed message {stale_id}: {cleanup_err}",
+                            )
                             batch_failed = True
 
-                    # Exactly a full page means there may be additional unread messages in
-                    # this interval. Keep the old cursor and drain the next page on a later
-                    # iteration. Advance only when the API returns a short page successfully.
+                    if candidates:
+                        emit_user_log("INFO", f"Processing {len(candidates)} eligible unread/retry email(s) for {acc_email}.")
+                        total_new_emails += len(candidates)
+
+                    for mid in candidates:
+                        if WORKER_STATE["stop_event"].is_set():
+                            break
+                        try:
+                            processed_ok = process_single_email(
+                                gmail_service, calendar_service, acc_email, mid, acc_email
+                            )
+                        except Exception:
+                            logger.exception("Unexpected processing wrapper failure for %s/%s", acc_email, mid)
+                            processed_ok = False
+                        if processed_ok:
+                            _clear_email_retry(acc_email, mid)
+                        else:
+                            delay = _defer_email_retry(acc_email, mid)
+                            batch_failed = True
+                            emit_user_log(
+                                "WARN",
+                                f"Email {mid} for {acc_email} remains retryable; next retry in about {delay} seconds.",
+                            )
+
+                    # A full batch means more eligible work may remain. If fewer than five
+                    # were eligible, only advance after Gmail returned its final page cleanly.
+                    # Failed IDs are kept in the separate retry queue above.
                     if (
-                        len(msg_ids) < EMAIL_BATCH_SIZE
+                        len(candidates) < EMAIL_BATCH_SIZE
+                        and query_drained
                         and not batch_failed
                         and not WORKER_STATE["stop_event"].is_set()
                     ):
@@ -927,7 +1033,6 @@ def background_worker_loop():
                     emit_user_log("ERROR", f"Error checking inbox for {acc_email}: {acc_err}")
 
             AdaptiveMemoryGovernor.trim()
-
             sleep_duration = ACTIVE_SLEEP if total_new_emails > 0 else IDLE_SLEEP
             if WORKER_STATE["stop_event"].wait(timeout=sleep_duration):
                 break

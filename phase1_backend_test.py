@@ -33,6 +33,7 @@ checks={
  'worker_rejects_unscoped_legacy_accounts':'if a.get("session_id") and _session_worker_enabled(a.get("session_id"))' in main,
  'admin_active_sessions_durable':'count_active_user_sessions(window_seconds=300)' in main,
  'admin_health_status_present':'"status": "ok" if ram >= 0 else "degraded"' in main,
+ 'worker_ui_enabled_requires_monitored_account':'any(bool(a.get("is_monitored")) for a in session_accs) and _session_worker_enabled(sid)' in main,
 
 }
 for k,v in checks.items():

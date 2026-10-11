@@ -6,7 +6,7 @@ Do not mark the deployment ready solely because the Render build succeeds. The `
 
 1. In Netlify, add the domain you own under **Domain management** and follow the DNS records Netlify gives you. Do not guess A/CNAME records; use the values shown for your site.
 2. Wait until Netlify reports the domain and HTTPS certificate as active.
-3. Set Render's `FRONTEND_URL` to the exact public HTTPS origin, for example `https://app.your-owned-domain.example` (replace with the domain you actually own). Do not leave it at a hosting-provider subdomain.
+3. Set Render's `FRONTEND_URL` to the exact public HTTPS origin, for example `https://app.your-owned-domain.example` (replace with the domain you actually own). Set `EMA_CUSTOM_DOMAIN_HOST` to that exact hostname without `https://` or a path. The backend health check requires both values to match and rejects known hosting-provider and placeholder domains.
 4. Set Render's `REDIRECT_URI` to the backend OAuth callback URL, currently `https://ema-host.onrender.com/auth/callback`. Google redirects to this backend URL. The backend then redirects to `FRONTEND_URL` with a short-lived, single-use exchange ticket; the frontend exchanges it for an HttpOnly session cookie through the Netlify `/api/*` proxy. If the backend hostname changes, update the redirect URI and proxy targets consistently.
 5. In Google Cloud Console, add the exact backend callback URL to the OAuth client's **Authorized redirect URIs**. This is a server-side OAuth flow, so the frontend does not normally need to be added as a Google **Authorized JavaScript origin**.
 6. Redeploy the frontend after DNS/HTTPS activation and verify its custom domain opens the actual frontend.

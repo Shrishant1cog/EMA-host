@@ -189,12 +189,18 @@ with tempfile.TemporaryDirectory() as temp_dir:
         drive_state_adapter.BASE_DIR = pathlib.Path(temp_dir)
         assert drive_state_adapter._get_shadow_path(first_email) != drive_state_adapter._get_shadow_path(second_email)
         legacy_path = drive_state_adapter._get_legacy_shadow_path(first_email)
-        legacy_path.write_text(json.dumps({
+        legacy_payload = {
             'settings': {'spam_threshold': '35'},
             'email_actions': [{'email_id': 'one', 'account_email': first_email, 'status': 'PROCESSED'}],
-        }), encoding='utf-8')
+        }
+        # Legacy data without an owner marker is ambiguous even if recent actions
+        # appear to match; never trust settings/stats that may have collided.
+        legacy_path.write_text(json.dumps(legacy_payload), encoding='utf-8')
+        assert drive_state_adapter._load_local_shadow(first_email) is None, 'Ambiguous legacy shadow was trusted'
+        legacy_payload['_shadow_account_email'] = first_email
+        legacy_path.write_text(json.dumps(legacy_payload), encoding='utf-8')
         migrated = drive_state_adapter._load_local_shadow(first_email)
-        assert migrated and migrated['settings']['spam_threshold'] == '35', 'Verified legacy shadow did not migrate'
+        assert migrated and migrated['settings']['spam_threshold'] == '35', 'Owner-marked legacy shadow did not migrate'
         assert drive_state_adapter._get_shadow_path(first_email).exists(), 'Collision-resistant shadow was not written'
         assert drive_state_adapter._load_local_shadow(second_email) is None, 'Legacy shadow from a different email was loaded'
     finally:

@@ -119,6 +119,43 @@ with tempfile.TemporaryDirectory() as temp_dir:
     finally:
         conn.close()
 
+# A global legacy refresh token must never be borrowed by another account.
+from backend.services import google_auth
+with tempfile.TemporaryDirectory() as temp_dir:
+    legacy_token_path = pathlib.Path(temp_dir) / 'token.json'
+    legacy_token_path.write_text(json.dumps({'refresh_token': 'belongs-to-account-a'}), encoding='utf-8')
+    old_get_account = google_auth.get_google_account
+    old_token_path = google_auth.TOKEN_PATH
+    old_credentials = google_auth.Credentials
+    captured = {}
+    class CapturingCredentials:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.refresh_token = kwargs.get('refresh_token')
+            self.expired = True
+            self.valid = False
+        def refresh(self, request):
+            raise AssertionError('refresh should not run without this account\'s refresh token')
+    try:
+        google_auth.get_google_account = lambda email: {
+            'email': 'account-b@example.com',
+            'name': 'Account B',
+            'picture': '',
+            'token_data': json.dumps({'token': 'account-b-access-token'}),
+            'session_id': 'session-account-b-123456789',
+            'is_monitored': 1,
+        }
+        google_auth.TOKEN_PATH = legacy_token_path
+        google_auth.Credentials = CapturingCredentials
+        assert google_auth.get_credentials_for_account('account-b@example.com') is None
+        assert captured.get('refresh_token') is None, 'A refresh token from the global legacy file was assigned to another account'
+        assert google_auth.is_reauth_needed('account-b@example.com')
+    finally:
+        google_auth.get_google_account = old_get_account
+        google_auth.TOKEN_PATH = old_token_path
+        google_auth.Credentials = old_credentials
+        google_auth.clear_account_reauth('account-b@example.com')
+
 # Per-session worker preferences survive process restarts and disappear on logout.
 with tempfile.TemporaryDirectory() as temp_dir:
     test_db = pathlib.Path(temp_dir) / 'worker-preferences.db'

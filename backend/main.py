@@ -70,6 +70,9 @@ from backend.utils.state_tracker import (
     touch_user_session,
     revoke_user_session,
     ensure_legacy_session,
+    is_user_session_worker_enabled,
+    set_user_session_worker_enabled,
+    count_active_user_sessions,
 )
 from backend.services.drive_state_adapter import (
     is_email_processed_drive,
@@ -788,15 +791,21 @@ _WORKER_PAUSED_SESSIONS: set[str] = set()
 
 
 def _session_worker_enabled(session_id: Optional[str]) -> bool:
-    if not session_id:
+    sid = str(session_id or "").strip()
+    if not sid:
         return False
     with _WORKER_SCOPE_LOCK:
-        return session_id not in _WORKER_PAUSED_SESSIONS
+        if sid in _WORKER_PAUSED_SESSIONS:
+            return False
+    return is_user_session_worker_enabled(sid)
 
 
 def _set_session_worker_enabled(session_id: str, enabled: bool) -> bool:
-    sid = str(session_id or '').strip()
+    sid = str(session_id or "").strip()
     if not sid:
+        return False
+    # Persist first: do not report a pause/start that disappears after restart.
+    if not set_user_session_worker_enabled(sid, enabled):
         return False
     with _WORKER_SCOPE_LOCK:
         if enabled:
@@ -826,7 +835,7 @@ def background_worker_loop():
             accounts = get_monitored_accounts()
             active_accounts = [
                 a for a in accounts
-                if not a.get("session_id") or _session_worker_enabled(a.get("session_id"))
+                if a.get("session_id") and _session_worker_enabled(a.get("session_id"))
             ]
             if not active_accounts:
                 WORKER_STATE["current_status"] = "Idle"
@@ -1040,11 +1049,6 @@ def inspect_previous_loop(max_target: int, scoped_accounts: List[Dict[str, Any]]
 # ADMIN CONTROL CENTER (SECURE SERVER-SIDE AUTHENTICATION)
 # ==============================================================================
 SERVER_STARTED_AT = time.time()
-
-# Bounded presence cache. It stores only session IDs and timestamps; no email body.
-_SESSION_LAST_SEEN: Dict[str, float] = {}
-_SESSION_LAST_SEEN_LOCK = threading.RLock()
-_SESSION_LAST_SEEN_MAX = 2048
 
 # Bounded in-process admin sessions. Raw tokens never live here.
 _ADMIN_SESSIONS: Dict[str, Dict[str, Any]] = {}
@@ -1344,99 +1348,6 @@ def _install_error_ledger_handler():
 _install_error_ledger_handler()
 
 
-def _touch_session(sid: Optional[str]):
-    if not sid:
-        return
-    try:
-        with _SESSION_LAST_SEEN_LOCK:
-            now = time.time()
-            _SESSION_LAST_SEEN[sid] = now
-            cutoff = now - 900
-            stale = [k for k, v in _SESSION_LAST_SEEN.items() if v < cutoff]
-            for key in stale:
-                _SESSION_LAST_SEEN.pop(key, None)
-            if len(_SESSION_LAST_SEEN) > _SESSION_LAST_SEEN_MAX:
-                oldest = sorted(_SESSION_LAST_SEEN.items(), key=lambda x: x[1])
-                for key, _ in oldest[:len(_SESSION_LAST_SEEN) - _SESSION_LAST_SEEN_MAX]:
-                    _SESSION_LAST_SEEN.pop(key, None)
-    except Exception:
-        pass
-
-
-@app.post("/api/admin/auth/login")
-def admin_auth_login(payload: AdminLoginPayload, request: Request):
-    configured_username = _get_admin_username()
-    configured_hash = _get_admin_password_hash()
-
-    if not configured_username or not configured_hash:
-        raise HTTPException(status_code=503, detail="Admin credentials are not configured on the server.")
-    if not _admin_login_allowed(request):
-        response = JSONResponse(
-            {"detail": "Too many admin login attempts. Try again later.", "retry_after_seconds": _admin_login_retry_after(request)},
-            status_code=429,
-        )
-        response.headers["Retry-After"] = str(_admin_login_retry_after(request))
-        return response
-
-    username_ok = hmac.compare_digest(payload.username.strip(), configured_username)
-    password_ok = _verify_admin_password(payload.password, configured_hash)
-
-    if not (username_ok and password_ok):
-        _record_admin_login_failure(request)
-        logger.warning("[ADMIN_AUTH] Failed admin login attempt")
-        _append_error_ledger("WARN", "Failed admin login attempt")
-        raise HTTPException(status_code=401, detail="Invalid admin username or password.")
-
-    _clear_admin_login_failures(request)
-    raw, csrf, expires = _create_admin_session()
-
-    response = JSONResponse({
-        "authenticated": True,
-        "role": "admin",
-        "username": configured_username,
-        "csrf_token": csrf,
-        "session_token": raw,
-        "expires_at": datetime.fromtimestamp(expires).isoformat(),
-    })
-    response.headers["Cache-Control"] = "no-store, max-age=0"
-    response.set_cookie(
-        "ema_admin_session",
-        raw,
-        httponly=True,
-        secure=_admin_cookie_secure(request),
-        samesite="strict",
-        path="/",
-        max_age=max(int(expires - time.time()), 900),
-    )
-    logger.info("[ADMIN_AUTH] Admin login successful")
-    return response
-
-
-@app.get("/api/admin/auth/me")
-def admin_auth_me(request: Request):
-    session = require_admin(request)
-    return {
-        "authenticated": True,
-        "role": "admin",
-        "username": _get_admin_username(),
-        "csrf_token": session["csrf_token"],
-        "expires_at": datetime.fromtimestamp(float(session["expires_at"])).isoformat(),
-    }
-
-
-@app.post("/api/admin/auth/logout")
-def admin_auth_logout(request: Request):
-    _revoke_admin_session(request)
-    response = JSONResponse({"authenticated": False})
-    response.delete_cookie(
-        "ema_admin_session",
-        path="/",
-        secure=_admin_cookie_secure(request),
-        samesite="strict",
-    )
-    return response
-
-
 def _admin_parse_log_line(line: str) -> Dict[str, str]:
     m = re.match(r"^\[([^\]]+)\]\s+\[([^\]]+)\]\s*(.*)$", line.strip())
     if not m:
@@ -1542,10 +1453,7 @@ def admin_overview(request: Request):
     error_count = sum(1 for x in parsed if x.get("level") == "ERROR")
     warning_count = sum(1 for x in parsed if x.get("level") in ("WARN", "WARNING"))
     ram = AdaptiveMemoryGovernor.get_memory_usage_mb()
-    now = time.time()
-    with _SESSION_LAST_SEEN_LOCK:
-        active_sids = {sid for sid, last in _SESSION_LAST_SEEN.items() if now - last <= 300}
-    active_users = len({(a.get("email") or "").strip().lower() for a in accounts if a.get("session_id") in active_sids and a.get("email")})
+    active_users = count_active_user_sessions(window_seconds=300)
     return {
         "users": len({(a.get("email") or "").strip().lower() for a in accounts if a.get("email")}),
         "active_users": active_users,
@@ -1555,8 +1463,10 @@ def admin_overview(request: Request):
         "processing": {"processed": processed, "actioned": actioned, "filtered": filtered, "failed": failed},
         "errors": {"error_count": error_count, "warning_count": warning_count},
         "health": {
+            "status": "ok" if ram >= 0 else "degraded",
             "memory_mb": ram,
-            "is_lean": ram < 500.0,
+            "memory_supported": ram >= 0,
+            "is_lean": 0 <= ram < 500.0,
             "uptime": f"{int(time.time() - SERVER_STARTED_AT) // 3600:02d}:{(int(time.time() - SERVER_STARTED_AT) % 3600) // 60:02d}:{int(time.time() - SERVER_STARTED_AT) % 60:02d}",
             "server_time": datetime.now().isoformat(),
         },
@@ -2873,7 +2783,6 @@ def get_stats(request: Request):
             "processed": processed,
             "filtered": filtered,
             "failed": failed,
-            "time_saved": (total * 2),
         },
         "worker": {
             "is_running": WORKER_STATE["is_running"],
@@ -2893,7 +2802,8 @@ def start_worker(request: Request):
     monitored = [a for a in accounts if a.get("is_monitored")]
     if not monitored:
         raise HTTPException(status_code=400, detail="No monitored accounts found for this session.")
-    _set_session_worker_enabled(sid, True)
+    if not _set_session_worker_enabled(sid, True):
+        raise HTTPException(status_code=503, detail="Could not save worker preference. Please retry.")
     start_worker_internal()
     return {"status": "started", "user_enabled": True}
 
@@ -2904,7 +2814,8 @@ def stop_worker(request: Request):
     accounts = get_accounts_for_session(sid)
     if not accounts:
         raise HTTPException(status_code=401, detail="Authentication required.")
-    _set_session_worker_enabled(sid, False)
+    if not _set_session_worker_enabled(sid, False):
+        raise HTTPException(status_code=503, detail="Could not save worker preference. Please retry.")
     # Stop the process only when no user's monitored accounts need the global worker.
     if not _has_any_active_worker_scope():
         stop_worker_internal()

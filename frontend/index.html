@@ -2142,7 +2142,8 @@
           checkProfileFormDirty();
 
           updateGreeting(userName);
-          document.getElementById('sidebar-accounts-count').innerText = `Monitoring ${totalAccs} inbox${totalAccs > 1 ? 'es' : ''}`;
+          const monitoredAccs = Number(data.monitored_accounts ?? totalAccs);
+          document.getElementById('sidebar-accounts-count').innerText = `${monitoredAccs} inbox${monitoredAccs === 1 ? '' : 'es'} monitored`;
           document.getElementById('kpi-accounts-active').innerText = data.monitored_accounts ?? totalAccs;
 
           const targetSelect = document.getElementById('setting-target-calendar-select');

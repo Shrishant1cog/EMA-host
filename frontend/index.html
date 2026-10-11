@@ -647,6 +647,15 @@
 
       const startIntro = async () => {
         if (closed || started) return;
+        const lowPower = document.documentElement.dataset.performance === 'eco' ||
+          document.documentElement.dataset.reducedMotion === 'true' ||
+          !!navigator.connection?.saveData;
+        // Do not fetch or decode the introduction video on data-saver,
+        // reduced-motion, or low-resource devices. The app remains usable.
+        if (lowPower) {
+          closeIntro();
+          return;
+        }
         started = true;
         overlay.classList.add('is-active');
         overlay.dataset.playback = 'starting';
@@ -659,11 +668,9 @@
         if (!video.src && source) video.src = source;
         video.load();
 
-        const lowPower = document.documentElement.dataset.performance === 'eco' ||
-          document.documentElement.dataset.reducedMotion === 'true';
         startupTimer = window.setTimeout(() => {
           if (!closed && video.paused) closeIntro();
-        }, lowPower ? 1800 : 3200);
+        }, 3200);
 
         try {
           if (video.readyState < 2) {

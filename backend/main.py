@@ -451,6 +451,17 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def prevent_private_api_caching(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/api/") or path.startswith("/auth/") or path == "/health":
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Vary"] = "Cookie, Origin"
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Lightweight request diagnostics. No request history is retained in memory.
 # ---------------------------------------------------------------------------
@@ -488,7 +499,6 @@ async def request_diagnostics(request: Request, call_next):
     return response
 
 
-@app.get("/health")
 def _frontend_uses_custom_https_domain(frontend_url: str) -> bool:
     parsed = urlparse(str(frontend_url or "").strip())
     host = (parsed.hostname or "").lower().rstrip(".")

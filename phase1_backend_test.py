@@ -34,6 +34,10 @@ checks={
  'admin_active_sessions_durable':'count_active_user_sessions(window_seconds=300)' in main,
  'admin_health_status_present':'"status": "ok" if ram >= 0 else "degraded"' in main,
  'no_cross_account_refresh_fallback':'legacy_data.get("refresh_token")' not in (ROOT/'backend/services/google_auth.py').read_text(encoding='utf-8'),
+ 'desktop_oauth_reuses_registered_flow':'reuse_registered_flow' in main and 'registered_flow.get("status") == "pending"' in main,
+ 'desktop_oauth_same_origin':'local_origin = str(request.base_url).rstrip("/")' in main,
+ 'desktop_oauth_returns_to_cookie_session':'window.location.replace("/index.html");' in main and 'window.location.replace("/index.html?session_id={sid}")' not in main,
+ 'launch_browser_reserves_auth_flow':'set_auth_flow(sid, status="pending", redirect_uri=get_dynamic_redirect_uri(request)' in main,
  'worker_ui_enabled_requires_monitored_account':'any(bool(a.get("is_monitored")) for a in session_accs) and _session_worker_enabled(sid)' in main,
 
 }

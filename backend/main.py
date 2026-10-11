@@ -856,9 +856,11 @@ def _set_session_worker_enabled(session_id: str, enabled: bool) -> bool:
 def _has_any_active_worker_scope() -> bool:
     accounts = get_monitored_accounts()
     return any(
-        a.get("session_id")
-        and _session_worker_enabled(a.get("session_id"))
-        and get_drive_setting(a.get("email", ""), "worker_enabled", "true").strip().lower() == "true"
+        not a.get("session_id")
+        or (
+            _session_worker_enabled(a.get("session_id"))
+            and get_drive_setting(a.get("email", ""), "worker_enabled", "true").strip().lower() == "true"
+        )
         for a in accounts
     )
 
@@ -881,9 +883,11 @@ def background_worker_loop():
             accounts = get_monitored_accounts()
             active_accounts = [
                 a for a in accounts
-                if a.get("session_id")
-                and _session_worker_enabled(a.get("session_id"))
-                and get_drive_setting(a.get("email", ""), "worker_enabled", "true").strip().lower() == "true"
+                if not a.get("session_id")
+                or (
+                    _session_worker_enabled(a.get("session_id"))
+                    and get_drive_setting(a.get("email", ""), "worker_enabled", "true").strip().lower() == "true"
+                )
             ]
             if not active_accounts:
                 WORKER_STATE["current_status"] = "Idle"
@@ -2088,18 +2092,23 @@ def launch_browser_auth(request: Request, email: Optional[str] = None):
     """
     existing_sid = get_request_session_id(request)
     sid = existing_sid or secrets.token_urlsafe(32)
+    flow_id = secrets.token_urlsafe(32)
+    # Bootstrap state maps an opaque flow ID to the candidate session only on the
+    # server. Neither the active bearer session nor the temporary session ID goes
+    # into the browser URL or the JSON response.
+    set_auth_flow(flow_id, status="pending", session_id=sid, error=None)
     hint_param = f"&email={quote(email.strip().lower(), safe='')}" if email else ""
 
     frontend = (getattr(config, "FRONTEND_URL", "") or os.getenv("FRONTEND_URL", "")).strip().rstrip("/")
     is_production = os.getenv("EMA_ENV", "").strip().lower() in {"production", "prod"}
     if is_production and frontend:
-        auth_url = f"{frontend}/auth/login?session_id={quote(sid, safe='')}&browser=1{hint_param}"
+        auth_url = f"{frontend}/auth/login?flow_id={quote(flow_id, safe='')}&browser=1{hint_param}"
     else:
-        auth_url = f"/auth/login?session_id={quote(sid, safe='')}&browser=1{hint_param}"
+        auth_url = f"/auth/login?flow_id={quote(flow_id, safe='')}&browser=1{hint_param}"
         if request.url.hostname in {"localhost", "127.0.0.1"}:
-            auth_url = f"{request.base_url}auth/login?session_id={quote(sid, safe='')}&browser=1{hint_param}"
+            auth_url = f"{request.base_url}auth/login?flow_id={quote(flow_id, safe='')}&browser=1{hint_param}"
 
-    response = JSONResponse({"status": "ready", "session_id": sid, "auth_url": auth_url})
+    response = JSONResponse({"status": "ready", "auth_url": auth_url, "flow_id": flow_id})
     response.headers["Cache-Control"] = "no-store, max-age=0"
     response.set_cookie(
         key="assistant_session_id",
@@ -2128,9 +2137,13 @@ def auth_login(
     supplied_sid = str(session_id or "").strip()
     if len(supplied_sid) > 256 or any(ord(ch) < 32 for ch in supplied_sid):
         supplied_sid = ""
-    # A temporary correlation value is not an authenticated session. OAuth state
-    # is always a separate random token and is never the active bearer session ID.
-    sid = existing_sid if existing_accounts else (supplied_sid or secrets.token_urlsafe(32))
+    bootstrap_flow = get_auth_flow(str(flow_id or "").strip()) if flow_id else None
+    bootstrap_sid = str((bootstrap_flow or {}).get("session_id") or "").strip()
+    # The browser sees only the opaque flow ID. Resolve its candidate session from
+    # this server-side record; OAuth state itself remains a separate random token.
+    sid = existing_sid if existing_accounts else (
+        supplied_sid or bootstrap_sid or secrets.token_urlsafe(32)
+    )
 
     if browser != "1":
         completion_flow_id = secrets.token_urlsafe(32)

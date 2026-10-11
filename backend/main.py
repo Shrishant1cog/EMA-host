@@ -69,7 +69,6 @@ from backend.utils.state_tracker import (
     is_user_session_valid,
     touch_user_session,
     revoke_user_session,
-    ensure_legacy_session,
 )
 from backend.services.drive_state_adapter import (
     is_email_processed_drive,
@@ -493,6 +492,7 @@ def get_request_session_id(request: Request) -> Optional[str]:
         return None
     if is_user_session_valid(sid):
         touch_user_session(sid)
+        _touch_session(sid)
     return sid
 
 
@@ -501,8 +501,8 @@ def get_accounts_for_session(sid: Optional[str]) -> List[Dict[str, Any]]:
         return []
     try:
         if not is_user_session_valid(sid):
-            if not ensure_legacy_session(sid):
-                return []
+            # An expired bearer token must not be revived from a lingering account row.
+            return []
         accounts = [a for a in list_all_google_accounts() if a.get("session_id") == sid]
         if accounts:
             touch_user_session(sid)
@@ -664,6 +664,7 @@ def _process_single_email_unlocked(
                         attachments=uploaded_attachments,
                         calendar_id=target_cal_email,
                         target_account_email=target_cal_email,
+                    source_email_id=str(mid),
                     )
                     if result.status in ("created", "duplicate_skipped"):
                         successful_count += 1
@@ -791,7 +792,15 @@ def _session_worker_enabled(session_id: Optional[str]) -> bool:
     if not session_id:
         return False
     with _WORKER_SCOPE_LOCK:
-        return session_id not in _WORKER_PAUSED_SESSIONS
+        if session_id in _WORKER_PAUSED_SESSIONS:
+            return False
+    # This preference is persisted per account, unlike the process-local pause set.
+    for acc in get_monitored_accounts():
+        if acc.get("session_id") != session_id:
+            continue
+        if get_drive_setting(acc.get("email", ""), "worker_enabled", "true").strip().lower() == "true":
+            return True
+    return False
 
 
 def _set_session_worker_enabled(session_id: str, enabled: bool) -> bool:
@@ -808,7 +817,12 @@ def _set_session_worker_enabled(session_id: str, enabled: bool) -> bool:
 
 def _has_any_active_worker_scope() -> bool:
     accounts = get_monitored_accounts()
-    return any(_session_worker_enabled(a.get('session_id')) for a in accounts)
+    return any(
+        a.get("session_id")
+        and _session_worker_enabled(a.get("session_id"))
+        and get_drive_setting(a.get("email", ""), "worker_enabled", "true").strip().lower() == "true"
+        for a in accounts
+    )
 
 
 def background_worker_loop():
@@ -826,7 +840,9 @@ def background_worker_loop():
             accounts = get_monitored_accounts()
             active_accounts = [
                 a for a in accounts
-                if not a.get("session_id") or _session_worker_enabled(a.get("session_id"))
+                if a.get("session_id")
+                and _session_worker_enabled(a.get("session_id"))
+                and get_drive_setting(a.get("email", ""), "worker_enabled", "true").strip().lower() == "true"
             ]
             if not active_accounts:
                 WORKER_STATE["current_status"] = "Idle"
@@ -1140,9 +1156,8 @@ def _cleanup_admin_sessions(now: Optional[float] = None):
 
 
 def _admin_client_key(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",", 1)[0].strip()[:64] or "unknown"
+    # Never key brute-force limits on a client-supplied X-Forwarded-For value.
+    # Use the peer address resolved by the ASGI server/proxy configuration.
     return (request.client.host if request.client else "unknown")[:64]
 
 
@@ -1620,7 +1635,7 @@ def admin_user_detail(email: str, request: Request):
             settings[key] = get_drive_setting(clean_email, key, default)
         except Exception:
             settings[key] = default
-    safe = {k: v for k, v in acc.items() if k != "token_data"}
+    safe = {k: v for k, v in acc.items() if k not in {"token_data", "session_id"}}
     safe["needs_reauth"] = needs
     return {"account": safe, "stats": stats, "settings": settings, "recent_actions": recent}
 
@@ -2409,10 +2424,19 @@ def update_user_profile(payload: ProfileUpdatePayload, request: Request):
     if not clean_name:
         raise HTTPException(status_code=400, detail="Display name cannot be empty.")
 
+    failed_accounts = []
     for acc in scoped_accs:
-        set_drive_setting(acc["email"], "custom_display_name", clean_name)
+        try:
+            if not set_drive_settings(acc["email"], {"custom_display_name": clean_name}):
+                failed_accounts.append(acc["email"])
+        except Exception:
+            logger.exception("Profile persistence failed for %s.", acc.get("email", "unknown"))
+            failed_accounts.append(acc.get("email", "unknown"))
 
-    emit_user_log("INFO", f"User profile display name updated to: '{clean_name}'")
+    if failed_accounts:
+        raise HTTPException(status_code=503, detail="Profile name could not be saved for every connected account. Please retry.")
+
+    emit_user_log("INFO", "User profile display name updated and saved.")
     return {"status": "success", "display_name": clean_name}
 
 
@@ -2428,7 +2452,9 @@ def list_accounts(request: Request):
         health = get_account_auth_state(acc_email)
         a["needs_reauth"] = bool(health.get("needs_reauth") or (health.get("expired") and not health.get("has_refresh_token")))
         a["credential_expired"] = bool(health.get("expired"))
-    return {"accounts": accounts}
+    # Session IDs are bearer credentials and must never be sent in account payloads.
+    safe_accounts = [{k: v for k, v in a.items() if k != "session_id"} for a in accounts]
+    return {"accounts": safe_accounts}
 
 
 class AccountTogglePayload(BaseModel):
@@ -2893,6 +2919,12 @@ def start_worker(request: Request):
     monitored = [a for a in accounts if a.get("is_monitored")]
     if not monitored:
         raise HTTPException(status_code=400, detail="No monitored accounts found for this session.")
+    failed_accounts = []
+    for acc in monitored:
+        if not set_drive_settings(acc["email"], {"worker_enabled": "true"}):
+            failed_accounts.append(acc["email"])
+    if failed_accounts:
+        raise HTTPException(status_code=503, detail="Could not persist the monitoring preference for every account. Please retry.")
     _set_session_worker_enabled(sid, True)
     start_worker_internal()
     return {"status": "started", "user_enabled": True}
@@ -2904,6 +2936,12 @@ def stop_worker(request: Request):
     accounts = get_accounts_for_session(sid)
     if not accounts:
         raise HTTPException(status_code=401, detail="Authentication required.")
+    failed_accounts = []
+    for acc in accounts:
+        if not set_drive_settings(acc["email"], {"worker_enabled": "false"}):
+            failed_accounts.append(acc["email"])
+    if failed_accounts:
+        raise HTTPException(status_code=503, detail="Could not persist the monitoring preference for every account. Please retry.")
     _set_session_worker_enabled(sid, False)
     # Stop the process only when no user's monitored accounts need the global worker.
     if not _has_any_active_worker_scope():

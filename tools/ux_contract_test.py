@@ -33,6 +33,7 @@ checks['render_pins_persistent_single_instance']='numInstances: 1' in render and
 checks['uvicorn_access_logs_disabled']='--no-access-log' in render
 checks['render_external_url_is_not_overridden']='      - key: RENDER_EXTERNAL_URL' not in render
 checks['health_gates_production_launch']='def _persistent_storage_readiness' in main and 'EMA_REQUIRE_CUSTOM_DOMAIN' in main and 'status_code=200 if ready else 503' in main and 'admin_credentials' in main
+checks['custom_domain_requires_explicit_matching_host']='EMA_CUSTOM_DOMAIN_HOST' in main and 'hmac.compare_digest(frontend_host, expected_custom_host)' in main and '".example"' in main
 checks['oauth_callback_is_claimed_atomically']='def claim_auth_flow' in main and 'flow_record = claim_auth_flow(oauth_state)' in main and 'state=oauth_state' in main
 checks['state_shadow_uses_configured_volume']='getattr(config, "DB_PATH"' in adapter and '.ema-state-shadows' in adapter and 'os.replace(temp_path, path)' in adapter and 'hashlib.sha256(clean_email.encode' in adapter
 checks['user_entry_has_auth_gate']='ema:auth-verified' in idx and 'await video.play()' in idx

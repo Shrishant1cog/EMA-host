@@ -35,7 +35,7 @@ checks={
  'admin_health_status_present':'"status": "ok" if ram >= 0 else "degraded"' in main,
  'no_cross_account_refresh_fallback':'legacy_data.get("refresh_token")' not in (ROOT/'backend/services/google_auth.py').read_text(encoding='utf-8'),
  'collision_resistant_shadow_path':'hashlib.sha256(clean.encode("utf-8")).hexdigest()[:20]' in (ROOT/'backend/services/drive_state_adapter.py').read_text(encoding='utf-8'),
- 'legacy_shadow_email_verified':'_shadow_actions_belong_to_email(data, clean_email)' in (ROOT/'backend/services/drive_state_adapter.py').read_text(encoding='utf-8'),
+ 'legacy_shadow_email_verified':'verified = marked_owner == clean_email' in (ROOT/'backend/services/drive_state_adapter.py').read_text(encoding='utf-8'),
  'desktop_oauth_reuses_registered_flow':'reuse_registered_flow' in main and 'registered_flow.get("status") == "pending"' in main,
  'desktop_oauth_same_origin':'local_origin = str(request.base_url).rstrip("/")' in main,
  'desktop_oauth_returns_to_cookie_session':'window.location.replace("/index.html");' in main and 'window.location.replace("/index.html?session_id={sid}")' not in main,

@@ -15,7 +15,7 @@ uxcss=(F/'ux-pro.css').read_text(encoding='utf-8')
 admin_css=(F/'admin/admin.css').read_text(encoding='utf-8')
 ui_source='\n'.join([idx, login, adm, adjs, styles, uxcss, admin_css])
 gradient_defs=re.findall(r'(?:linear|radial|conic)-gradient[(][^;{}]*', ui_source, re.I)
-checks['no_purple_gradient_defs']=not any(re.search(r'indigo|violet|purple|99,102,241|129,140,248|#6366f1|#4f46e5|#818cf8',g,re.I) for g in gradient_defs)
+checks['no_purple_gradient_defs']=not any(re.search(r'indigo|violet|purple|99,\\s*102,\\s*241|129,\\s*140,\\s*248|#6366f1|#4f46e5|#818cf8',g,re.I) for g in gradient_defs)
 checks['no_purple_tailwind_gradients']=not re.search(r'bg-gradient-to-[^"]*(?:indigo|violet|purple)',ui_source,re.I)
 checks['no_emoji_icons_in_ui']=not any(0x1F300 <= ord(ch) <= 0x1FAFF or 0x2600 <= ord(ch) <= 0x27BF for ch in ui_source)
 checks['no_em_or_en_dashes_in_ui']=chr(0x2014) not in ui_source and chr(0x2013) not in ui_source

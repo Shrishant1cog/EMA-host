@@ -30,6 +30,10 @@ class CalendarResult(dict):
         return None
 
 
+class DuplicateCheckUnavailable(RuntimeError):
+    """Calendar list failure: creating now could duplicate an event."""
+
+ 
 # ----------------- Timezone & Datetime Utilities ----------------- #
 
 def _get_safe_zoneinfo(tz_name: Optional[str] = None) -> ZoneInfo:
@@ -170,19 +174,23 @@ def find_duplicate_event(
         time_max = (start_dt + timedelta(minutes=90)).isoformat()
 
         # Request only fields needed for duplicate matching
-        events_result = (
-            calendar_service.events()
-            .list(
-                calendarId=calendar_id,
-                timeMin=time_min,
-                timeMax=time_max,
-                maxResults=25,
-                singleEvents=True,
-                orderBy="startTime",
-                fields="items(id,summary,description,location,start,end,htmlLink,extendedProperties)",
+        try:
+            events_result = (
+                calendar_service.events()
+                .list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    maxResults=25,
+                    singleEvents=True,
+                    orderBy="startTime",
+                    fields="items(id,summary,description,location,start,end,htmlLink,extendedProperties)",
+                )
+                .execute()
             )
-            .execute()
-        )
+        except Exception as api_error:
+            logger.warning("Calendar duplicate lookup failed for %s; refusing to create an unverified event.", calendar_id)
+            raise DuplicateCheckUnavailable("Could not verify existing calendar events.") from api_error
 
         items = events_result.get("items", [])
         target_title = ev.title.strip().casefold()
@@ -234,6 +242,8 @@ def find_duplicate_event(
                         pass
 
         return None
+    except DuplicateCheckUnavailable:
+        raise
     except Exception as e:
         logger.warning(f"Duplicate reconciliation skipped on {calendar_id}: {e}")
         return None
@@ -258,8 +268,17 @@ def create_or_update_event(
     tz_str = getattr(config, "USER_TIMEZONE", ev.timezone or "Asia/Kolkata")
     resolved_calendar_id = (target_account_email or calendar_id).strip().lower()
 
-    # 1. Skip creating duplicate if matching event exists
-    existing = find_duplicate_event(calendar_service, ev, resolved_calendar_id)
+    # 1. Skip creating duplicate if matching event exists. If Google Calendar
+    # cannot be queried, fail closed rather than inserting an unverified duplicate.
+    try:
+        existing = find_duplicate_event(calendar_service, ev, resolved_calendar_id)
+    except DuplicateCheckUnavailable:
+        return CalendarResult(
+            event_id=None,
+            html_link="",
+            status="failed",
+            error="Could not verify existing calendar events. No event was created; retry after Calendar is available.",
+        )
     if existing:
         logger.info(
             f"[{resolved_calendar_id}] Skipped duplicate event '{ev.title}' (ID: {existing.get('id')})."

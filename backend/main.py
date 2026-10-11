@@ -1903,6 +1903,22 @@ def serve_index_page(request: Request, session_id: Optional[str] = None):
     if not sid or not get_accounts_for_session(sid):
         return RedirectResponse(url="/login.html", status_code=303)
 
+    if session_id:
+        # A legacy query string may carry an opaque session token. Exchange it
+        # for the HttpOnly cookie, then continue at a clean URL.
+        response = RedirectResponse(url="/index.html", status_code=303)
+        response.set_cookie(
+            key="assistant_session_id",
+            value=sid,
+            httponly=True,
+            secure=_session_cookie_secure(),
+            samesite="lax",
+            path="/",
+            max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600),
+        )
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        return response
+
     html_path = FRONTEND_DIR / "index.html"
     if not html_path.exists():
         raise HTTPException(status_code=404, detail="frontend/index.html not found")
@@ -1931,7 +1947,20 @@ def serve_login_page(request: Request):
         return RedirectResponse(url=f"{frontend}/login.html", status_code=307)
     sid = get_request_session_id(request)
     if sid and get_accounts_for_session(sid):
-        return RedirectResponse(url=f"/index.html?session_id={sid}", status_code=303)
+        # Keep the session token in the HttpOnly cookie, not in browser history or
+        # a Referer header on the redirected page.
+        response = RedirectResponse(url="/index.html", status_code=303)
+        response.set_cookie(
+            key="assistant_session_id",
+            value=sid,
+            httponly=True,
+            secure=_session_cookie_secure(),
+            samesite="lax",
+            path="/",
+            max_age=getattr(config, "SESSION_TTL_SECONDS", 7 * 24 * 3600),
+        )
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        return response
 
     html_path = FRONTEND_DIR / "login.html"
     if not html_path.exists():

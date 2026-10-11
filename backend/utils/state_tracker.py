@@ -221,8 +221,79 @@ def revoke_user_session(session_id: str, db_path: Path = DEFAULT_DB_PATH) -> Non
     init_db(db_path)
     conn = get_db_connection(db_path)
     try:
-        conn.execute("DELETE FROM user_sessions WHERE session_hash = ?", (_session_hash(clean),))
+        session_key = _session_hash(clean)
+        conn.execute("DELETE FROM user_sessions WHERE session_hash = ?", (session_key,))
+        conn.execute(
+            "DELETE FROM system_settings WHERE key = ?",
+            (f"worker_enabled:{session_key}",),
+        )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def is_user_session_worker_enabled(session_id: str, db_path: Path = DEFAULT_DB_PATH) -> bool:
+    """Read the persisted per-session worker preference; default new sessions to enabled."""
+    clean = str(session_id or "").strip()
+    if not clean or len(clean) > 256:
+        return False
+    key = f"worker_enabled:{_session_hash(clean)}"
+    try:
+        init_db(db_path)
+        conn = get_db_connection(db_path)
+        try:
+            row = conn.execute("SELECT value FROM system_settings WHERE key = ?", (key,)).fetchone()
+            if not row:
+                return True
+            return str(row[0]).strip().lower() in {"1", "true", "yes", "on"}
+        finally:
+            conn.close()
+    except Exception as exc:
+        # Fail closed if the durable preference cannot be read.
+        logger.warning("Could not read persisted worker setting: %s", exc)
+        return False
+
+
+def set_user_session_worker_enabled(
+    session_id: str, enabled: bool, db_path: Path = DEFAULT_DB_PATH
+) -> bool:
+    """Persist worker enablement independently of the current Python process."""
+    clean = str(session_id or "").strip()
+    if len(clean) < 8 or len(clean) > 256:
+        return False
+    key = f"worker_enabled:{_session_hash(clean)}"
+    try:
+        init_db(db_path)
+        conn = get_db_connection(db_path)
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)",
+                (key, "true" if enabled else "false"),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.error("Could not persist worker setting: %s", exc)
+        return False
+
+
+def count_active_user_sessions(
+    window_seconds: int = 300, db_path: Path = DEFAULT_DB_PATH
+) -> int:
+    """Count authenticated sessions seen recently, rather than relying on volatile RAM."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    window = max(60, min(int(window_seconds), 86400))
+    cutoff = now - timedelta(seconds=window)
+    init_db(db_path)
+    conn = get_db_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM user_sessions WHERE last_seen >= ? AND expires_at > ?",
+            (cutoff.isoformat(), now.isoformat()),
+        ).fetchone()
+        return max(0, int(row[0] if row else 0))
     finally:
         conn.close()
 

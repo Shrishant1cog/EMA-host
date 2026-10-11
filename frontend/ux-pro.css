@@ -39,7 +39,7 @@ html.auth-verified .ambient-mesh { opacity:1; }
 #app-main-scroll > header { position:sticky; top:0; }
 #app-main-scroll > header::after {
   content:""; position:absolute; left:0; right:0; bottom:-1px; height:1px;
-  background:linear-gradient(90deg,transparent,rgba(99,102,241,.38),rgba(34,211,238,.2),transparent);
+  background:linear-gradient(90deg,transparent,rgba(148,163,184,.24),rgba(34,211,238,.12),transparent);
   opacity:.5;
 }
 
@@ -55,7 +55,7 @@ html.auth-verified .ambient-mesh { opacity:1; }
 .nav-btn { position:relative; overflow:hidden; }
 .nav-btn::after {
   content:""; position:absolute; left:8px; top:50%; width:3px; height:0; border-radius:999px;
-  background:linear-gradient(#22d3ee,#6366f1); transform:translateY(-50%);
+  background:linear-gradient(#22d3ee,#94a3b8); transform:translateY(-50%);
   transition:height .3s var(--ema-pro-ease), opacity .3s ease;
   opacity:0;
 }

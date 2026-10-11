@@ -548,7 +548,14 @@ async def request_diagnostics(request: Request, call_next):
 def _frontend_uses_custom_https_domain(frontend_url: str) -> bool:
     parsed = urlparse(str(frontend_url or "").strip())
     host = (parsed.hostname or "").lower().rstrip(".")
-    if parsed.scheme.lower() != "https" or not host or "." not in host:
+    if (
+        parsed.scheme.lower() != "https"
+        or not host
+        or "." not in host
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
         return False
     if host in {
         "localhost", "127.0.0.1", "::1",

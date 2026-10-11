@@ -437,7 +437,7 @@ def _normalize_event_dict(event: Dict[str, Any], subject: str, default_time: str
 
 def _hard_gate(data: Dict[str, Any], subject: str, sender: str, attachment_text: str, default_time: str,
                spam_threshold: float, current_datetime: str, require_document_evidence: bool,
-               timezone_name: str) -> Dict[str, Any]:
+               timezone_name: str, email_body: str = "") -> Dict[str, Any]:
     data = dict(data or {})
     data["spam_threshold"] = spam_threshold
     subject_l = (subject or "").lower()
@@ -494,7 +494,7 @@ def _hard_gate(data: Dict[str, Any], subject: str, sender: str, attachment_text:
 
     raw_events = data.get("events") if isinstance(data.get("events"), list) else [data.get("events")] if isinstance(data.get("events"), dict) else []
     clean_events: List[Dict[str, Any]] = []
-    fallback_text = f"{subject}\n{sender}\n{attachment_text or ''}"
+    fallback_text = f"{subject}\n{sender}\n{email_body or ''}\n{attachment_text or ''}"
     temporal_evidence_present = _has_temporal_evidence(fallback_text)
     for ev in raw_events:
         normalized = _normalize_event_dict(ev, subject, default_time, timezone_name, fallback_text)
@@ -729,6 +729,7 @@ CANDIDATE:\n{json.dumps(candidate, ensure_ascii=False)}"""
             current_datetime=current_datetime,
             require_document_evidence=getattr(config, "REQUIRE_DOCUMENT_EVIDENCE", False),
             timezone_name=getattr(config, "USER_TIMEZONE", "Asia/Kolkata"),
+            email_body=email_body,
         )
         if not approved or not corrected.get("events"):
             corrected["events"] = []
@@ -846,6 +847,7 @@ def extract_events_from_email(
             current_datetime=current_iso,
             require_document_evidence=require_docs,
             timezone_name=tz_name,
+            email_body=safe_body,
         )
 
         # More expensive verification only when there is something worth verifying.

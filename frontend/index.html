@@ -84,30 +84,51 @@
     const IS_LOCAL_EMA = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
     const BACKEND_URL = IS_LOCAL_EMA ? "http://127.0.0.1:8000" : "";
     const SESSION_KEY = "ema_session_id";
-    (function bootstrapSession(){
+    const getSessionId = () => "";
+    const clearSessionId = () => { try { localStorage.removeItem(SESSION_KEY); } catch (_) {} };
+
+    // Browser sessions are HttpOnly cookies. The URL carries only a 120-second,
+    // single-use transfer ticket, never the long-lived session bearer token.
+    window.__emaAuthTransferPromise = (async function(){
+      let ticket = "";
       try {
         const hash = location.hash.startsWith('#') ? location.hash.slice(1) : '';
         const fragment = new URLSearchParams(hash);
-        const handedOff = fragment.get('ema_session');
-        if (handedOff) { localStorage.setItem(SESSION_KEY, handedOff); history.replaceState(null,'',location.pathname+location.search); }
+        ticket = fragment.get('ema_ticket') || '';
+        const legacySession = fragment.get('ema_session') || '';
+        if (ticket || legacySession) history.replaceState(null, '', location.pathname + location.search);
       } catch (_) {}
+      clearSessionId();
+      if (!ticket) return true;
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/auth/exchange`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          credentials: 'include',
+          cache: 'no-store',
+          body: JSON.stringify({ ticket })
+        });
+        const data = await response.json().catch(() => ({}));
+        return Boolean(response.ok && data.authenticated);
+      } catch (_) {
+        return false;
+      }
     })();
-    const getSessionId = () => { try { return localStorage.getItem(SESSION_KEY) || ""; } catch (_) { return ""; } };
-    const clearSessionId = () => { try { localStorage.removeItem(SESSION_KEY); } catch (_) {} };
+
     (function(){
       const originalFetch = window.fetch.bind(window);
       let authRedirecting=false;
       window.fetch = async function(input, init={}){
-        const headers=new Headers(init.headers||{}); const sid=getSessionId();
-        if(sid&&!headers.has('X-Session-ID')) headers.set('X-Session-ID',sid);
+        const headers=new Headers(init.headers||{});
         const response=await originalFetch(input,{...init,headers,credentials:'include'});
         if(response.status===401&&window.__emaAuthVerified&&!authRedirecting){authRedirecting=true;window.__emaAuthVerified=false;clearSessionId();window.location.replace('/login.html');}
         return response;
       };
       window.__emaAuthPromise=(async function(){
         try{
-          const headers={}; const sid=getSessionId(); if(sid) headers['X-Session-ID']=sid;
-          const res=await originalFetch(`${BACKEND_URL}/api/user`,{credentials:'include',headers,cache:'no-store'});
+          const transferReady = await window.__emaAuthTransferPromise;
+          if (!transferReady) throw new Error('Authentication transfer expired. Please sign in again.');
+          const res=await originalFetch(`${BACKEND_URL}/api/user`,{credentials:'include',cache:'no-store'});
           const data=await res.json().catch(()=>({}));
           if(!res.ok||!data.authenticated) throw new Error('Not authenticated');
           document.documentElement.classList.add('auth-verified'); document.body.classList.remove('auth-pending'); document.body.classList.add('auth-ready');

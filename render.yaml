@@ -3,8 +3,9 @@ services:
     name: ema-backend
     runtime: python
     plan: standard
+    numInstances: 1
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --no-access-log
     healthCheckPath: /health
     disk:
       name: ema-data
@@ -23,6 +24,10 @@ services:
         value: "true"
       - key: TOKEN_ENCRYPTION_REQUIRED
         value: "true"
+      - key: EMA_REQUIRE_CUSTOM_DOMAIN
+        value: "true"
+      - key: EMA_RENDER_DISK_MOUNT_PATH
+        value: /var/data
       - key: DB_PATH
         value: /var/data/assistant.db
       - key: DATABASE_URL
@@ -34,8 +39,6 @@ services:
       - key: FRONTEND_URL
         sync: false
       - key: BACKEND_URL
-        sync: false
-      - key: RENDER_EXTERNAL_URL
         sync: false
       - key: REDIRECT_URI
         sync: false

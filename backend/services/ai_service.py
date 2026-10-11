@@ -307,13 +307,27 @@ def _has_temporal_evidence(text: str) -> bool:
     return any(hints.get(k) for k in ("dates", "times", "relative_terms", "meeting_urls"))
 
 
+def _trusted_meeting_provider(host: str) -> Optional[str]:
+    """Return a provider only for the actual provider domain or a subdomain of it."""
+    clean_host = (host or "").strip().lower().rstrip(".")
+    if clean_host == "meet.google.com" or clean_host.endswith(".meet.google.com"):
+        return "Google Meet"
+    if clean_host == "zoom.us" or clean_host.endswith(".zoom.us"):
+        return "Zoom"
+    if clean_host == "teams.microsoft.com" or clean_host.endswith(".teams.microsoft.com"):
+        return "Microsoft Teams"
+    if clean_host == "webex.com" or clean_host.endswith(".webex.com"):
+        return "Webex"
+    return None
+
+
 def _extract_meeting_url(text: str) -> Optional[str]:
     if not text:
         return None
     for match in re.findall(r'https?://[^\s<>"\']+', text):
         candidate = match.rstrip(".,);]}")
         host = (urlparse(candidate).hostname or "").lower()
-        if any(h in host for h in ("meet.google.com", "zoom.us", "teams.microsoft.com", "webex.com")):
+        if _trusted_meeting_provider(host):
             return candidate
     return None
 
@@ -328,14 +342,9 @@ def _infer_virtual_meeting(event: Dict[str, Any], fallback_text: str) -> Optiona
     if url:
         result["url"] = url
         host = (urlparse(url).hostname or "").lower()
-        if "meet.google.com" in host:
-            result.setdefault("provider", "Google Meet")
-        elif "zoom.us" in host:
-            result.setdefault("provider", "Zoom")
-        elif "teams.microsoft.com" in host:
-            result.setdefault("provider", "Microsoft Teams")
-        elif "webex.com" in host:
-            result.setdefault("provider", "Webex")
+        provider = _trusted_meeting_provider(host)
+        if provider:
+            result.setdefault("provider", provider)
     for pattern, key in [
         (r"(?:meeting|meet)\s*(?:id|code)\s*[:#-]?\s*([A-Za-z0-9 ._-]{4,})", "meeting_id"),
         (r"(?:passcode|password)\s*[:#-]?\s*([A-Za-z0-9_-]{3,})", "passcode"),

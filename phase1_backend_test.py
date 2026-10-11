@@ -38,6 +38,8 @@ checks={
  'desktop_oauth_same_origin':'local_origin = str(request.base_url).rstrip("/")' in main,
  'desktop_oauth_returns_to_cookie_session':'window.location.replace("/index.html");' in main and 'window.location.replace("/index.html?session_id={sid}")' not in main,
  'launch_browser_reserves_auth_flow':'set_auth_flow(sid, status="pending", redirect_uri=get_dynamic_redirect_uri(request)' in main,
+ 'stale_oauth_flow_expires':'time.time() - float(flow.get("timestamp", 0) or 0) > 900' in main,
+ 'oauth_waiter_handles_idle_status':'data.status === "failed" || data.status === "idle"' in main,
  'worker_ui_enabled_requires_monitored_account':'any(bool(a.get("is_monitored")) for a in session_accs) and _session_worker_enabled(sid)' in main,
 
 }

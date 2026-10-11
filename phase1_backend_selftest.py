@@ -14,7 +14,7 @@ sys.modules['groq']=groq
 # Import config and services.
 import config
 from backend.models.event_schemas import UniversalEmailAnalysis, CalendarEvent
-from backend.services import ai_service, calendar_service
+from backend.services import ai_service, calendar_service, drive_state_adapter
 from backend.utils import state_tracker
 
 # AI deterministic gates.
@@ -147,6 +147,23 @@ except RuntimeError:
     pass
 else:
     raise AssertionError('Calendar duplicate verification failure must not silently permit creation')
+
+# Local fallback shadows must use the configured database volume, write atomically,
+# and avoid collisions between distinct emails that normalize to the same filename.
+_original_db_path = config.DB_PATH
+with tempfile.TemporaryDirectory() as temp_dir:
+    config.DB_PATH = pathlib.Path(temp_dir) / 'assistant.db'
+    email_a = 'a.b@example.com'
+    email_b = 'a_b@example.com'
+    shadow_a = drive_state_adapter._get_shadow_path(email_a)
+    shadow_b = drive_state_adapter._get_shadow_path(email_b)
+    assert shadow_a.parent == pathlib.Path(temp_dir) / '.ema-state-shadows'
+    assert shadow_a != shadow_b, 'Email-normalized state shadow names must not collide'
+    expected_state = {'version': 1, 'settings': {'theme_mode': 'dark'}}
+    drive_state_adapter._save_local_shadow(email_a, expected_state)
+    assert drive_state_adapter._load_local_shadow(email_a) == expected_state
+    assert not list(shadow_a.parent.glob('*.tmp')), 'Atomic state save must clean up temp files'
+config.DB_PATH = _original_db_path
 
 # Token encryption round trip with an isolated temporary key.
 try:

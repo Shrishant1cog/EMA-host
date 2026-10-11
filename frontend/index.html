@@ -1015,17 +1015,17 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span id="sidebar-worker-dot" class="w-2 h-2 rounded-full bg-emerald-400 glow-pulse"></span>
-            <span id="sidebar-worker-status" class="text-xs font-bold text-white tracking-wide">Monitoring</span>
+            <span id="sidebar-worker-status" class="text-xs font-bold text-white tracking-wide">Checking</span>
           </div>
-          <span class="text-[9px] font-mono px-1.5 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-bold">LIVE</span>
+          <span id="sidebar-worker-badge" class="text-[9px] font-mono px-1.5 py-0.5 rounded-md bg-slate-700 text-slate-300 font-bold">CHECKING</span>
         </div>
-        <p id="sidebar-accounts-count" class="text-[11px] text-slate-400 font-medium">Monitoring 1 account</p>
+        <p id="sidebar-accounts-count" class="text-[11px] text-slate-400 font-medium">Checking connected accounts</p>
       </div>
 
       <div class="px-2 text-[11px] text-slate-500 flex items-center justify-between">
-        <a href="/privacy.html" target="_blank" class="hover:underline hover:text-slate-300 transition">Privacy</a>
+        <a href="/privacy.html" class="hover:underline hover:text-slate-300 transition">Privacy</a>
         <span>•</span>
-        <a href="/terms.html" target="_blank" class="hover:underline hover:text-slate-300 transition">Terms</a>
+        <a href="/terms.html" class="hover:underline hover:text-slate-300 transition">Terms</a>
       </div>
     </div>
   </aside>
@@ -1048,13 +1048,13 @@
         </button>
         <div id="ema-connection-badge" class="hidden sm:flex items-center gap-1.5 px-2.5 py-2 rounded-full bg-white/[0.03] border border-white/[0.06] text-[10px] text-slate-400" aria-live="polite">
           <span id="ema-connection-dot" class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-          <span id="ema-connection-text">Online</span>
+          <span id="ema-connection-text">Checking service</span>
         </div>
 
         <button onclick="toggleWorker()" class="btn-action flex items-center gap-2 px-3.5 py-2 rounded-full glass-card text-xs text-slate-300">
           <span id="header-worker-dot" class="w-2 h-2 rounded-full bg-emerald-400 glow-pulse"></span>
           <span class="hidden sm:inline text-slate-400 text-[11px]">System:</span>
-          <span id="header-worker-text" class="font-bold text-white uppercase text-[11px] tracking-wide">Running</span>
+          <span id="header-worker-text" class="font-bold text-white uppercase text-[11px] tracking-wide">Checking</span>
         </button>
 
         <div class="relative z-50" id="user-menu-wrapper">
@@ -1066,7 +1066,7 @@
               <div id="header-user-name" class="text-xs text-white font-bold truncate max-w-[110px] sm:max-w-[140px]">User</div>
               <div id="header-accounts-badge" class="text-[9.5px] text-emerald-400 font-mono font-medium flex items-center gap-1">
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                <span id="header-accounts-count-text">1 Account</span>
+                <span id="header-accounts-count-text">Checking</span>
               </div>
             </div>
             <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-400"></i>
@@ -1126,17 +1126,17 @@
             </div>
             <div>
               <h3 id="kpi-actioned" class="text-2xl sm:text-3xl font-black text-white tracking-tight">0</h3>
-              <p class="text-[11.5px] font-medium text-slate-400">Events Scheduled</p>
+              <p class="text-[11.5px] font-medium text-slate-400">Emails Actioned</p>
             </div>
           </div>
 
           <div class="glass-card rounded-2xl p-4.5 flex items-center gap-4">
             <div class="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 flex items-center justify-center shrink-0 shadow-inner">
-              <i data-lucide="hard-drive" class="w-5 h-5"></i>
+              <i data-lucide="filter" class="w-5 h-5"></i>
             </div>
             <div>
               <h3 id="kpi-attachments" class="text-2xl sm:text-3xl font-black text-white tracking-tight">0</h3>
-              <p class="text-[11.5px] font-medium text-slate-400">Files Saved to Drive</p>
+              <p class="text-[11.5px] font-medium text-slate-400">Emails Filtered</p>
             </div>
           </div>
 
@@ -1411,6 +1411,7 @@
     let emailRequestSequence = 0;
     let calendarRequestSequence = 0;
     let workerToggleBusy = false;
+    let currentUserWorkerEnabled = null;
     let loaderDepth = 0;
     let iconRefreshTimer = 0;
     let iconLoadListenerBound = false;
@@ -1785,7 +1786,7 @@
 
                 <div class="flex items-center justify-between text-[10px] pt-1.5 border-t border-white/[0.04]">
                   <span class="font-mono uppercase font-semibold ${isAssistant ? 'text-indigo-400' : 'text-slate-400'}">
-                    ${isAssistant ? '⚡ Scheduled by EMA' : '📅 Google Calendar'}
+                    ${isAssistant ? 'Scheduled by EMA' : 'Google Calendar'}
                   </span>
                   ${hasFiles ? `<span class="px-2 py-0.5 rounded-md bg-cyan-500/15 text-cyan-300 font-mono flex items-center gap-1"><i data-lucide="paperclip" class="w-3 h-3"></i>Files Attached</span>` : ''}
                 </div>
@@ -1820,7 +1821,7 @@
 
       document.getElementById('event-modal-title').innerText = ev.summary || 'Scheduled Event';
       document.getElementById('event-edit-summary').value = ev.summary || '';
-      document.getElementById('event-modal-origin-badge').innerText = ev._is_assistant_created ? '⚡ Scheduled by EMA' : '📅 Google Calendar';
+      document.getElementById('event-modal-origin-badge').innerText = ev._is_assistant_created ? 'Scheduled by EMA' : 'Google Calendar';
 
       const rawStart = ev.start?.dateTime || ev.start?.date || '';
       const rawEnd = ev.end?.dateTime || ev.end?.date || '';
@@ -2295,38 +2296,68 @@
 
     async function loadStats() {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/stats`);
+        const res = await fetch(`${BACKEND_URL}/api/stats`, { credentials: 'include', cache: 'no-store' });
+        if (!res.ok) throw new Error(`Stats request failed (${res.status})`);
         const data = await res.json();
         if (data.summary) {
           animateNumber('kpi-total', data.summary.total);
           animateNumber('kpi-actioned', data.summary.actioned);
-          animateNumber('kpi-attachments', data.summary.filtered || 0);
+          animateNumber('kpi-attachments', data.summary.filtered ?? 0);
         }
-        const running = data.worker && data.worker.is_running;
-        const text = running ? "Running" : "Idle";
-        document.getElementById('header-worker-text').innerText = text;
-        document.getElementById('sidebar-worker-status').innerText = text;
-
-        const dotClass = running ? "bg-emerald-400 glow-pulse" : "bg-slate-500";
-        document.getElementById('header-worker-dot').className = `w-2 h-2 rounded-full ${dotClass}`;
-        document.getElementById('sidebar-worker-dot').className = `w-2 h-2 rounded-full ${dotClass}`;
+        currentUserWorkerEnabled = typeof data.worker?.user_enabled === 'boolean' ? data.worker.user_enabled : null;
+        const text = currentUserWorkerEnabled === null
+          ? "Unavailable"
+          : (currentUserWorkerEnabled ? "Monitoring" : "Paused");
+        const headerText = document.getElementById('header-worker-text');
+        const sidebarText = document.getElementById('sidebar-worker-status');
+        if (headerText) headerText.innerText = text;
+        if (sidebarText) sidebarText.innerText = text;
+        const sidebarBadge = document.getElementById('sidebar-worker-badge');
+        if (sidebarBadge) {
+          sidebarBadge.innerText = currentUserWorkerEnabled === null ? "UNKNOWN" : (currentUserWorkerEnabled ? "ON" : "OFF");
+          sidebarBadge.className = `text-[9px] font-mono px-1.5 py-0.5 rounded-md font-bold ${currentUserWorkerEnabled === null ? "bg-amber-500/15 text-amber-300" : currentUserWorkerEnabled ? "bg-emerald-500/15 text-emerald-300" : "bg-slate-700 text-slate-300"}`;
+        }
+        const dotClass = currentUserWorkerEnabled === true
+          ? "bg-emerald-400 glow-pulse"
+          : currentUserWorkerEnabled === false ? "bg-slate-500" : "bg-amber-400";
+        const headerDot = document.getElementById('header-worker-dot');
+        const sidebarDot = document.getElementById('sidebar-worker-dot');
+        if (headerDot) headerDot.className = `w-2 h-2 rounded-full ${dotClass}`;
+        if (sidebarDot) sidebarDot.className = `w-2 h-2 rounded-full ${dotClass}`;
         const mobDot = document.getElementById('mobile-worker-dot');
         if (mobDot) mobDot.className = `inline-block w-2 h-2 rounded-full ${dotClass}`;
-      } catch (err) {}
+      } catch (err) {
+        currentUserWorkerEnabled = null;
+        const headerText = document.getElementById('header-worker-text');
+        const sidebarText = document.getElementById('sidebar-worker-status');
+        if (headerText) headerText.innerText = "Unavailable";
+        if (sidebarText) sidebarText.innerText = "Unavailable";
+        const sidebarBadge = document.getElementById('sidebar-worker-badge');
+        if (sidebarBadge) {
+          sidebarBadge.innerText = "UNKNOWN";
+          sidebarBadge.className = "text-[9px] font-mono px-1.5 py-0.5 rounded-md font-bold bg-amber-500/15 text-amber-300";
+        }
+      }
     }
 
     async function toggleWorker() {
       if (workerToggleBusy) return;
       workerToggleBusy = true;
-      const statusText = document.getElementById('header-worker-text')?.innerText || '';
-      const isRunning = /running/i.test(statusText);
-      showLoader(isRunning ? "Pausing Assistant..." : "Activating Assistant...");
       try {
-        await fetchJson(`${BACKEND_URL}${isRunning ? '/api/worker/stop' : '/api/worker/start'}`, { method: 'POST' });
+        if (currentUserWorkerEnabled === null) await loadStats();
+        if (currentUserWorkerEnabled === null) {
+          throw new Error("Worker status is unavailable. Refresh the page and retry.");
+        }
+        const wasEnabled = currentUserWorkerEnabled;
+        showLoader(wasEnabled ? "Pausing monitoring..." : "Starting monitoring...");
+        await fetchJson(`${BACKEND_URL}${wasEnabled ? '/api/worker/stop' : '/api/worker/start'}`, { method: 'POST' });
         await loadStats();
-        showToast(isRunning ? "Monitoring paused" : "Autonomous monitoring active", "info");
+        if (currentUserWorkerEnabled === wasEnabled) {
+          throw new Error("The monitoring preference was not confirmed by the server.");
+        }
+        showToast(wasEnabled ? "Monitoring paused" : "Monitoring enabled", "info");
       } catch (err) {
-        showToast(err.message || "Unable to update assistant status.", "error");
+        showToast(err.message || "Unable to update monitoring.", "error");
       } finally {
         workerToggleBusy = false;
         hideLoader();
@@ -2718,25 +2749,38 @@ async function toggleInspect() {
     window.addEventListener('DOMContentLoaded', async () => {
       scheduleIconRefresh();
 
-      function updateConnectionBadge() {
-        const dot=document.getElementById('ema-connection-dot');
-        const text=document.getElementById('ema-connection-text');
-        if(!dot||!text) return;
-        const online=navigator.onLine !== false;
-        dot.className=`w-1.5 h-1.5 rounded-full ${online?'bg-emerald-400':'bg-rose-400'}`;
-        text.textContent=online?'Online':'Offline';
-      }
-      updateConnectionBadge();
-      window.addEventListener('online', updateConnectionBadge, {passive:true});
-      window.addEventListener('offline', updateConnectionBadge, {passive:true});
-      fetch(`${BACKEND_URL}/health`, {credentials:'include'}).then(r=>r.json()).then(d=>{
-        const badge=document.getElementById('ema-connection-badge');
-        const text=document.getElementById('ema-connection-text');
-        if(badge&&text&&d?.status==='ok'){
-          text.textContent=d.is_lean===true?'Online · Lean':'Online';
-          badge.title=`Server RAM: ${d.memory_mb ?? '?'} MB`;
+      async function refreshConnectionBadge() {
+        const badge = document.getElementById('ema-connection-badge');
+        const dot = document.getElementById('ema-connection-dot');
+        const text = document.getElementById('ema-connection-text');
+        if (!badge || !dot || !text) return;
+        if (navigator.onLine === false) {
+          dot.className = 'w-1.5 h-1.5 rounded-full bg-rose-400';
+          text.textContent = 'Offline';
+          badge.title = 'This browser reports no network connection.';
+          return;
         }
-      }).catch(()=>{});
+        dot.className = 'w-1.5 h-1.5 rounded-full bg-slate-500';
+        text.textContent = 'Checking service';
+        try {
+          const response = await fetch(`${BACKEND_URL}/health`, { credentials: 'include', cache: 'no-store' });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const health = await response.json();
+          if (health?.status !== 'ok') throw new Error('Health endpoint did not report success');
+          dot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400';
+          text.textContent = 'Service OK';
+          badge.title = health.memory_supported === false
+            ? 'Backend health endpoint responded; RAM telemetry is unavailable.'
+            : `Backend reachable. Process RAM: ${health.memory_mb ?? 'unknown'} MB.`;
+        } catch (_) {
+          dot.className = 'w-1.5 h-1.5 rounded-full bg-rose-400';
+          text.textContent = 'Unavailable';
+          badge.title = 'The backend health endpoint could not be reached.';
+        }
+      }
+      refreshConnectionBadge();
+      window.addEventListener('online', refreshConnectionBadge, { passive: true });
+      window.addEventListener('offline', refreshConnectionBadge, { passive: true });
 
       const savedTheme = localStorage.getItem('ema_theme_mode');
       applyVisualMode(savedTheme === 'read' ? 'read' : 'dark', { persist: false });
@@ -2757,7 +2801,7 @@ async function toggleInspect() {
        }, 60000);
 
       setInterval(() => {
-        if (!document.hidden && window.__emaAuthVerified) fetch(`${BACKEND_URL}/health`, {credentials:'include'}).catch(()=>{});
+        if (!document.hidden && window.__emaAuthVerified) refreshConnectionBadge();
       }, 300000);
     });
   </script>

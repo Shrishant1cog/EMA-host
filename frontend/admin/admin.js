@@ -97,7 +97,44 @@
   async function userAction(kind,email,extra={}){try{const path=kind==='toggle'?'/api/admin/users/toggle-monitoring':kind==='delete'?'/api/admin/users/delete':'/api/admin/users/clear-reauth';await api(path,{method:'POST',body:JSON.stringify({email,...extra})});toast(kind==='delete'?'Account disconnected':'Admin action completed','good');await loadUsers();await loadOverview()}catch(e){toast(e.message,'bad')}}
 
   async function loadAIStatus(){try{const d=await api('/api/admin/ai/status');setText('#ai-primary',d.primary_model||'-');setText('#ai-verifier',d.verifier?.enabled?(d.verifier.model||'Enabled'):'Disabled');setText('#ai-verifier-sub',d.verifier?.enabled?`Reasoning: ${d.verifier?.reasoning_effort||'-'}`:'Verification disabled');const fallbacks=Array.isArray(d.fallback_models)?d.fallback_models:[];setText('#ai-fallbacks',fmtNum(fallbacks.length));const b=$("#ai-status-badge");if(b){b.textContent=d.verifier?.enabled?'ONLINE':'PRIMARY ONLY';b.className=`status-badge ${d.verifier?.enabled?'good':'warn'}`}}catch(e){const b=$("#ai-status-badge");if(b){b.textContent='UNAVAILABLE';b.className='status-badge bad'}}}
-  async function loadOverview(){try{const d=await api('/api/admin/overview');animateCount($("#users-total"),d.users);animateCount($("#active-total"),d.active_users);animateCount($("#monitoring-total"),d.monitoring);animateCount($("#reauth-total"),d.reauth_required);animateCount($("#processed-total"),d.processing?.processed);animateCount($("#error-total"),d.errors?.error_count);setText('#ram-value',`${d.health?.memory_mb??0} MB`);setText('#ram-state',d.health?.is_lean?'Lean target':'Above target');setText('#worker-value',d.worker?.is_running?'LIVE':'IDLE');setText('#worker-sub',d.worker?.last_sync?`Last sync ${fmtDate(d.worker.last_sync)}`:'No sync yet');setText('#inspect-value',d.inspect?.is_running?'RUNNING':'READY');setText('#inspect-sub',d.inspect?.status_message||'');setText('#server-uptime',d.health?.uptime||'-');setText('#server-time',fmtDate(d.health?.server_time));setText('#users-count-note',`${fmtNum(d.accounts)} connected account${Number(d.accounts||0)===1?'':'s'}`);const healthy=d.health?.status==='ok';setText('#hero-health-title',healthy?'Service healthy':'Attention required');setText('#hero-health-copy',healthy?`${d.health?.memory_mb??0} MB process RSS · worker ${d.worker?.is_running?'active':'idle'}`:'Health telemetry unavailable');const dot=$("#hero-health-dot");if(dot)dot.style.background=healthy?'#34d399':'#fb7185'}catch(e){setText('#hero-health-title','Telemetry unavailable');setText('#hero-health-copy',e.message)}}
+  async function loadOverview(){
+    try {
+      const d=await api('/api/admin/overview');
+      animateCount($("#users-total"),d.users);
+      animateCount($("#active-total"),d.active_users);
+      animateCount($("#monitoring-total"),d.monitoring);
+      animateCount($("#reauth-total"),d.reauth_required);
+      animateCount($("#processed-total"),d.processing?.processed);
+      animateCount($("#error-total"),d.errors?.error_count);
+      const health=d.health||{};
+      const memorySupported=health.memory_supported===true && Number(health.memory_mb)>=0;
+      setText('#ram-value',memorySupported?`${health.memory_mb} MB`:'Unavailable');
+      setText('#ram-state',memorySupported?(health.is_lean?'Below 500 MB target':'Above 500 MB target'):'RAM telemetry unavailable');
+      setText('#worker-value',d.worker?.is_running?'RUNNING':'IDLE');
+      setText('#worker-sub',d.worker?.last_sync?`Last sync ${fmtDate(d.worker.last_sync)}`:'No sync recorded');
+      setText('#inspect-value',d.inspect?.is_running?'RUNNING':'IDLE');
+      setText('#inspect-sub',d.inspect?.status_message||'No scan status');
+      setText('#server-uptime',health.uptime||'-');
+      setText('#server-time',fmtDate(health.server_time));
+      setText('#users-count-note',`${fmtNum(d.accounts)} connected account${Number(d.accounts||0)===1?'':'s'}`);
+      const healthy=health.status==='ok';
+      setText('#hero-health-title',healthy?'Backend reachable':'Attention required');
+      setText('#hero-health-copy',healthy?(memorySupported?`${health.memory_mb} MB process RSS; worker ${d.worker?.is_running?'active':'idle'}`:`Backend responded; RAM telemetry unavailable; worker ${d.worker?.is_running?'active':'idle'}`):'Health telemetry unavailable');
+      const dot=$("#hero-health-dot");
+      if(dot)dot.style.background=healthy?'#34d399':'#fb7185';
+      const runtimeBadge=$("#runtime-health-badge");
+      if(runtimeBadge){runtimeBadge.textContent=healthy?'HEALTHY':'DEGRADED';runtimeBadge.className=`status-badge ${healthy?'good':'bad'}`;}
+    } catch(e) {
+      setText('#hero-health-title','Telemetry unavailable');
+      setText('#hero-health-copy','The admin API could not return service status.');
+      const dot=$("#hero-health-dot");if(dot)dot.style.background='#fb7185';
+      const runtimeBadge=$("#runtime-health-badge");
+      if(runtimeBadge){runtimeBadge.textContent='UNAVAILABLE';runtimeBadge.className='status-badge bad';}
+      setText('#ram-value','Unavailable');
+      setText('#ram-state','RAM telemetry unavailable');
+      toast('Could not refresh backend telemetry.','bad');
+    }
+  }
   async function loadErrors(){try{const d=await api('/api/admin/errors?limit=120');state.errors=d.errors||[];$("#error-grid").innerHTML=(d.categories||[]).map(c=>`<div class="glass-panel error-card"><span class="eyebrow">${esc(c.name)}</span><div class="count">${fmtNum(c.count)}</div><div class="hint">${esc(c.description)}</div></div>`).join('');$("#error-log").innerHTML=state.errors.length?state.errors.map(x=>`<div class="log-row"><div class="log-time">${esc(x.time)}</div><div><span class="badge ${x.level==='ERROR'?'bad':'warn'}">${esc(x.level)}</span></div><div class="log-msg"><strong>${esc(x.category)}</strong><br>${esc(x.message)}</div></div>`).join(''):'<div class="empty">No warnings or errors in the current ledger.</div>'}catch(e){toast(e.message,'bad')}}
   async function loadLogs(){try{const d=await api('/api/admin/logs?limit=180');state.logs=d.lines||[];$("#full-log").innerHTML=state.logs.length?state.logs.map(x=>`<div class="log-row"><div class="log-time">${esc(x.time)}</div><div><span class="badge ${x.level==='ERROR'?'bad':x.level==='WARNING'?'warn':x.level==='SUCCESS'?'good':'info'}">${esc(x.level)}</span></div><div class="log-msg">${esc(x.message)}</div></div>`).join(''):'<div class="empty">No log lines available.</div>'}catch(e){toast(e.message,'bad')}}
   async function loadActivity(){try{const d=await api('/api/admin/activity?limit=100');$("#activity-log").innerHTML=(d.activity||[]).map(x=>`<div class="log-row"><div class="log-time">${esc((x.processed_at||'').replace('T',' ').slice(0,19))}</div><div><span class="badge ${x.status==='FAILED'?'bad':x.status==='ACTIONED'?'good':'info'}">${esc(x.status||'-')}</span></div><div class="log-msg"><strong>${esc(x.email)}</strong><br>${esc(x.subject||'No subject')}<br><span style="color:#6b778d">${esc(x.category||'')} · ${esc(x.summary||'')}</span></div></div>`).join('')||'<div class="empty">No activity available.</div>'}catch(e){toast(e.message,'bad')}}

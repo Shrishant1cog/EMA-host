@@ -56,6 +56,16 @@ checks['responsive_flat_design_overrides'] = 'prefers-reduced-motion:reduce' in 
 admin_css = (F/'admin/admin.css').read_text(encoding='utf-8')
 checks['no_invisible_gradient_text'] = 'text-transparent' not in idx and '.login-hero h1 em' in admin_css and '-webkit-text-fill-color:#edf2f7!important' in admin_css
 checks['mobile_zoom_not_disabled'] = 'user-scalable=no' not in login and 'viewport-fit=cover' in login
+checks['no_fabricated_time_saved_metric'] = '"time_saved"' not in main
+checks['dashboard_actioned_metric_labeled_accurately'] = 'Emails Actioned' in idx and 'Events Scheduled' not in idx
+checks['dashboard_filtered_metric_labeled_accurately'] = 'Emails Filtered' in idx and 'Files Saved to Drive' not in idx
+checks['dashboard_uses_user_worker_preference'] = 'data.worker?.user_enabled' in idx and 'sidebar-worker-badge' in idx and 'currentUserWorkerEnabled' in idx
+checks['dashboard_backend_health_is_verified'] = 'refreshConnectionBadge' in idx and 'Service OK' in idx and 'textContent=online?' not in idx
+checks['no_calendar_description_emoji'] = '📎' not in (B/'services/calendar_service.py').read_text(encoding='utf-8')
+checks['no_emoji_calendar_source_labels'] = '⚡ Scheduled by EMA' not in idx and '📅 Google Calendar' not in idx
+checks['admin_runtime_health_is_dynamic'] = 'id="runtime-health-badge"' in adm and "runtimeBadge.textContent=healthy?'HEALTHY':'DEGRADED'" in adjs
+checks['admin_counts_not_mislabeled_as_events'] = '<th>Emails actioned</th>' in adm and "detail('Emails actioned'" in adjs and '<th>Events</th>' not in adm
+
 low_power_gate = idx.find('if (lowPower)')
 video_load = idx.find('video.load()', low_power_gate if low_power_gate >= 0 else 0)
 checks['intro_video_skipped_on_low_resource_devices'] = low_power_gate >= 0 and video_load > low_power_gate and 'navigator.connection?.saveData' in idx

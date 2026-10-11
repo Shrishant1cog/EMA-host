@@ -18,6 +18,7 @@ button,input,select{font:inherit}button{cursor:pointer}button:disabled{opacity:.
 
 
 /* EMA 2.0.1: neutral surfaces, restrained controls, and low-cost rendering. */
+.login-hero h1 em{background:none!important;color:#edf2f7!important;-webkit-text-fill-color:#edf2f7!important}
 *{background-image:none!important}
 :root{--bg:#080c12;--bg2:#0c1118;--panel:#111820;--panel2:#151c25;--border:#293440;--muted:#94a3b8;--text:#edf2f7;--indigo:#93a4b5;--cyan:#9ab8c5;--ease:ease}
 html,body{background:#080c12;color:#edf2f7;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}

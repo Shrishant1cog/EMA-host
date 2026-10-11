@@ -2,61 +2,61 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Terms of Service - EMA Smart Universal Email Assistant</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080c12">
+  <meta name="description" content="Terms for using EMA inbox processing and calendar assistance.">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <title>EMA | Terms of Service</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#080c12;color:#e2e8f0}
+    *{box-sizing:border-box}
+    body{margin:0;min-width:0;background:#080c12;color:#e2e8f0;line-height:1.65}
+    a{color:#a5c7d5;text-underline-offset:3px;overflow-wrap:anywhere}
+    a:focus-visible{outline:2px solid #93c5fd;outline-offset:3px}
+    .page{width:min(860px,100%);margin:0 auto;padding:max(24px,env(safe-area-inset-top)) 20px max(32px,env(safe-area-inset-bottom))}
+    nav{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:18px;border-bottom:1px solid #293440;font-size:14px}
+    nav a:first-child{font-weight:700;color:#f8fafc;text-decoration:none}
+    .document{margin-top:24px;padding:clamp(20px,4vw,42px);background:#111820;border:1px solid #293440;border-radius:8px}
+    h1{font-size:clamp(26px,4vw,36px);line-height:1.2;letter-spacing:-.03em;margin:0}
+    h2{font-size:18px;line-height:1.35;margin:30px 0 8px;color:#f8fafc}
+    p,li{font-size:15px;color:#cbd5e1}
+    .updated{font-size:13px;color:#94a3b8;margin:9px 0 0}
+    footer{display:flex;flex-wrap:wrap;gap:18px;margin:24px 0;font-size:14px}
+    @media(max-width:480px){.page{padding-left:12px;padding-right:12px}.document{padding:18px}p,li{font-size:14px}nav{align-items:flex-start;flex-direction:column}}
+  </style>
 </head>
-<body class="bg-slate-950 text-slate-200 antialiased py-12 px-4 sm:px-6 lg:px-8 font-sans">
-  <div class="max-w-3xl mx-auto bg-slate-900 border border-slate-800 rounded-3xl p-8 sm:p-12 shadow-2xl space-y-8">
-    
-    <div>
-      <h1 class="text-3xl font-extrabold text-white tracking-tight">Terms of Service</h1>
-      <p class="text-sm text-slate-400 mt-2">Effective Date: September 2026</p>
-    </div>
+<body>
+  <div class="page">
+    <nav aria-label="Legal navigation"><a href="/">EMA</a><span>Terms of Service</span></nav>
+    <main class="document">
+      <h1>Terms of Service</h1>
+      <p class="updated">Effective date: October 11, 2026</p>
 
-    <section class="space-y-3">
-      <h2 class="text-xl font-bold text-white">1. Acceptance of Terms</h2>
-      <p class="text-sm text-slate-300 leading-relaxed">
-        By accessing or using EMA Smart Universal Email Assistant ("the Service"), you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the Service.
-      </p>
-    </section>
+      <h2>1. Agreement</h2>
+      <p>These Terms govern your use of EMA, an application that helps process authorized Gmail messages and manage related Google Calendar events. By using the service, you agree to these Terms. Do not use EMA if you do not agree.</p>
 
-    <section class="space-y-3">
-      <h2 class="text-xl font-bold text-white">2. Description of the Service</h2>
-      <p class="text-sm text-slate-300 leading-relaxed">
-        EMA is an productivity assistant designed to read authorized Gmail messages, extract calendar-relevant information, and schedule events into Google Calendar on behalf of the authenticated user.
-      </p>
-    </section>
+      <h2>2. What the service does</h2>
+      <p>EMA can inspect authorized messages and supported attachments, extract event-related details, and create or update calendar items through the Google permissions you grant. Features may change, be unavailable, or be paused for maintenance.</p>
 
-    <section class="space-y-3">
-      <h2 class="text-xl font-bold text-white">3. User Responsibilities &amp; Acceptable Use</h2>
-      <p class="text-sm text-slate-300 leading-relaxed">
-        You agree to use the Service only for lawful purposes. You must not attempt to disrupt the integrity of the server, reverse engineer backend endpoints, or connect unauthorized third-party accounts without permission.
-      </p>
-    </section>
+      <h2>3. Account permissions and your responsibilities</h2>
+      <p>You must be authorized to connect each account and must review the permissions presented by Google. Use EMA only for lawful purposes. Do not attempt to access another person's account without authorization, bypass access controls, interfere with service availability, or misuse the application.</p>
 
-    <section class="space-y-3">
-      <h2 class="text-xl font-bold text-white">4. Disclaimer of Warranties</h2>
-      <p class="text-sm text-slate-300 leading-relaxed">
-        The Service is provided "as is" and "as available" without warranties of any kind. While our automated parsing strives for high accuracy, you remain responsible for verifying the details of scheduled calendar events.
-      </p>
-    </section>
+      <h2>4. Verify automated results</h2>
+      <p>Message text and attachments can be ambiguous, incomplete, or misleading. EMA can extract incorrect dates, times, attendees, or event details. You are responsible for checking proposed or created events, correcting mistakes, and deciding whether an event is appropriate. Do not rely on EMA as the sole source of truth for urgent, safety-critical, legal, medical, or financial deadlines.</p>
 
-    <section class="space-y-3">
-      <h2 class="text-xl font-bold text-white">5. Termination</h2>
-      <p class="text-sm text-slate-300 leading-relaxed">
-        We reserve the right to suspend or terminate your access to the Service at our discretion if these Terms are violated. You may disconnect your account at any time via the application interface.
-      </p>
-    </section>
+      <h2>5. Third-party services</h2>
+      <p>EMA relies on Google services for account access, Gmail, Calendar, and Drive features, and may use a model-inference provider to extract structured details. Those third-party services are governed by their own terms and policies. Changes or outages in a third-party service can affect EMA.</p>
 
-    <section class="space-y-3">
-      <h2 class="text-xl font-bold text-white">6. Inquiries</h2>
-      <p class="text-sm text-slate-300 leading-relaxed">
-        For inquiries regarding these Terms, contact:
-        <span class="block mt-1 font-mono text-blue-300">shrishanthsandigawad1@gmail.com</span>
-      </p>
-    </section>
+      <h2>6. Availability and disclaimer</h2>
+      <p>The service is provided on an "as available" basis. To the extent permitted by applicable law, EMA is provided without warranties that it will be uninterrupted, error-free, or suitable for a particular purpose. This section does not exclude rights that cannot lawfully be excluded.</p>
 
+      <h2>7. Suspension and disconnection</h2>
+      <p>You may stop using EMA and revoke Google access at any time. We may restrict access when reasonably necessary to protect the service, users, or systems, or to address misuse. Revoking Google access does not itself remove Calendar events or Drive files already created by EMA.</p>
+
+      <h2>8. Changes and contact</h2>
+      <p>These Terms may be updated as the service changes. The effective date at the top identifies the latest revision published here. Questions about these Terms can be sent to <a href="mailto:shrishanthsandigawad1@gmail.com">shrishanthsandigawad1@gmail.com</a>.</p>
+    </main>
+    <footer aria-label="Legal links"><a href="/privacy.html">Privacy Policy</a><a href="/">Back to EMA</a></footer>
   </div>
 </body>
 </html>

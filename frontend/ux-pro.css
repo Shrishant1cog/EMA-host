@@ -1,7 +1,7 @@
 /* EMA 2.0.1 interaction layer. Keep motion short, predictable, and optional. */
 html,body{scroll-behavior:auto}
 body{isolation:isolate}
-#ema-entry-video{opacity:0;visibility:hidden;pointer-events:none;transform:none;transition:opacity .2s ease,visibility .2s linear}
+#ema-entry-video{opacity:0;visibility:hidden;pointer-events:none;transform:none;animation:none!important;transition:opacity .2s ease,visibility .2s linear}
 #ema-entry-video.is-active{opacity:1;visibility:visible;pointer-events:auto;transform:none}
 #ema-entry-video.is-hidden{opacity:0;visibility:hidden;pointer-events:none;transform:none}
 #ema-entry-video-media{filter:none}#ema-entry-video::before{content:none}

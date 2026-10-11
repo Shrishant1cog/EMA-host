@@ -230,7 +230,28 @@ def revoke_user_session(session_id: str, db_path: Path = DEFAULT_DB_PATH) -> Non
     conn = get_db_connection(db_path)
     try:
         session_key = _session_hash(clean)
-        conn.execute("DELETE FROM user_sessions WHERE session_hash = ?", (session_key,))
+        linked_account = conn.execute(
+            "SELECT 1 FROM google_accounts WHERE session_id = ? LIMIT 1",
+            (clean,),
+        ).fetchone()
+        if linked_account:
+            # Keep an expired tombstone while an account still references this
+            # session ID. Deleting the row would make a later legacy migration
+            # mistake the revoked session for an old pre-migration session.
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            expired = (now - timedelta(seconds=1)).isoformat()
+            conn.execute(
+                """
+                INSERT INTO user_sessions (session_hash, created_at, expires_at, last_seen)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(session_hash) DO UPDATE SET
+                    expires_at = excluded.expires_at,
+                    last_seen = excluded.last_seen
+                """,
+                (session_key, now.isoformat(), expired, now.isoformat()),
+            )
+        else:
+            conn.execute("DELETE FROM user_sessions WHERE session_hash = ?", (session_key,))
         conn.execute(
             "DELETE FROM system_settings WHERE key = ?",
             (f"worker_enabled:{session_key}",),

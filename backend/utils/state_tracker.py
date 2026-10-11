@@ -228,18 +228,11 @@ def revoke_user_session(session_id: str, db_path: Path = DEFAULT_DB_PATH) -> Non
 
 
 def ensure_legacy_session(session_id: str, db_path: Path = DEFAULT_DB_PATH) -> bool:
+    """Compatibility helper: never recreate expired bearer sessions from account rows."""
     clean = str(session_id or "").strip()
     if not clean:
         return False
-    if is_user_session_valid(clean, db_path):
-        return True
-    init_db(db_path)
-    conn = get_db_connection(db_path)
-    try:
-        row = conn.execute("SELECT 1 FROM google_accounts WHERE session_id = ? LIMIT 1", (clean,)).fetchone()
-    finally:
-        conn.close()
-    return create_user_session(clean, db_path=db_path) if row else False
+    return is_user_session_valid(clean, db_path)
 
 
 def upsert_google_account(

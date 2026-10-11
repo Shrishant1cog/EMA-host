@@ -24,6 +24,36 @@ checks['video_present']=video.exists() and video.stat().st_size>0
 checks['backend_compile']=subprocess.run(['python','-m','py_compile',str(B/'main.py'),str(B/'utils/state_tracker.py')]).returncode==0
 for p in [F/'admin/admin.js',F/'ux-pro.js']:
     checks[f'js_{p.name}']=subprocess.run(['node','--check',str(p)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
+
+# Public launch and design guardrails for EMA 2.0.1.
+privacy = F/'privacy.html'
+terms = F/'terms.html'
+uxjs = (F/'ux-pro.js').read_text(encoding='utf-8')
+public_pages = {
+    'dashboard': idx,
+    'login': login,
+    'privacy': privacy.read_text(encoding='utf-8'),
+    'terms': terms.read_text(encoding='utf-8'),
+    'admin': adm,
+}
+checks['privacy_page_exists'] = privacy.exists()
+checks['terms_page_exists'] = terms.exists()
+checks['legal_pages_linked_from_dashboard'] = '/privacy.html' in idx and '/terms.html' in idx
+checks['legal_pages_linked_from_login'] = '/privacy.html' in login and '/terms.html' in login
+checks['favicon_linked_on_all_pages'] = all('/favicon.ico' in page for page in public_pages.values()) and (F/'favicon.ico').is_file()
+checks['no_made_with_ai_badge'] = all('made with ai' not in page.lower() for page in public_pages.values())
+checks['no_trust_badges_or_fake_testimonials'] = all(
+    all(token not in page.lower() for token in ('trust-avatars','trust-row','trusted by','happy customers','customer reviews','★★★★★'))
+    for page in public_pages.values()
+)
+checks['no_cursor_tracking_handlers'] = all(
+    token not in (idx + login + adm + adjs + uxjs).lower()
+    for token in ('addEventListener("pointermove"','addEventListener("mousemove"','addEventListener(\'pointermove\'','addEventListener(\'mousemove\'','cursor-ripple','cursor-trail')
+)
+checks['no_injected_marketing_block'] = 'ema-pro-welcome' not in uxjs and '/ux-pro.js' not in idx
+checks['no_remote_google_font_dependency'] = all('fonts.googleapis.com' not in page for page in public_pages.values())
+checks['responsive_flat_design_overrides'] = 'prefers-reduced-motion:reduce' in idx and 'background-image:none!important' in idx and 'button:focus-visible' in login
+
 print(json.dumps(checks,indent=2))
 failed=[k for k,v in checks.items() if not v]
 print('UX_CONTRACT_TEST:', 'PASS' if not failed else 'FAIL')

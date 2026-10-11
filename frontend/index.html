@@ -145,7 +145,7 @@
       --ema-border: rgba(255, 255, 255, 0.08);
       --ema-text: #f1f5f9;
       --ema-subtext: #94a3b8;
-      --ema-ambient: radial-gradient(circle at 50% 20%, rgba(99, 102, 241, 0.12) 0%, rgba(4, 7, 17, 0.98) 100%);
+      --ema-ambient: radial-gradient(circle at 50% 20%, rgba(71, 85, 105, 0.12) 0%, rgba(4, 7, 17, 0.98) 100%);
     }
 
     [data-theme="dark"] {
@@ -321,7 +321,7 @@
     .ema-reveal.is-visible { opacity:1; transform:none; transition:opacity .42s var(--ema-ease),transform .42s var(--ema-ease); }
     .ema-interactive { transition:transform .18s var(--ema-ease),border-color .18s ease,box-shadow .18s ease,background-color .18s ease; }
     #ema-entry-progress { position:absolute; left:50%; bottom:max(18px,env(safe-area-inset-bottom)); transform:translateX(-50%); width:min(280px,42vw); height:3px; z-index:3; overflow:hidden; border-radius:999px; background:rgba(255,255,255,.12); pointer-events:none; }
-    #ema-entry-progress span { display:block; width:0; height:100%; border-radius:inherit; background:linear-gradient(90deg,#6366f1,#22d3ee); transform-origin:left center; }
+    #ema-entry-progress span { display:block; width:0; height:100%; border-radius:inherit; background:linear-gradient(90deg,#64748b,#cbd5e1); transform-origin:left center; }
     #ema-entry-status { position:absolute; left:50%; bottom:calc(max(18px,env(safe-area-inset-bottom)) + 13px); transform:translateX(-50%); z-index:3; color:rgba(255,255,255,.62); font:600 9px/1.2 "JetBrains Mono",monospace; letter-spacing:.08em; text-transform:uppercase; pointer-events:none; white-space:nowrap; }
     .quick-palette-backdrop { position:fixed; inset:0; z-index:99990; display:grid; place-items:start center; padding-top:clamp(70px,12vh,130px); background:rgba(2,4,11,.56); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
     .quick-palette { width:min(560px,calc(100vw - 28px)); background:rgba(8,13,26,.97); border:1px solid rgba(255,255,255,.1); border-radius:20px; box-shadow:0 30px 100px rgba(0,0,0,.6); overflow:hidden; animation:paletteIn .22s var(--ema-ease); }
@@ -374,7 +374,7 @@
         height: calc(100dvh - 57px);
       }
       .ambient-mesh {
-        background: radial-gradient(circle at 50% 15%, rgba(99,102,241,.10), rgba(4,7,17,.98) 68%);
+        background: radial-gradient(circle at 50% 15%, rgba(71,85,105,.10), rgba(4,7,17,.98) 68%);
       }
       .glass-card {
         backdrop-filter: blur(7px);
@@ -852,7 +852,7 @@
   <!-- Mobile Top Bar -->
   <header class="md:hidden flex items-center justify-between px-4 py-3 bg-[#060911]/90 backdrop-blur-md border-b border-white/[0.08] z-30">
     <div class="flex items-center gap-2.5">
-      <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-cyan-400 p-[1px] shadow-md">
+      <div class="w-8 h-8 rounded-xl bg-slate-700 border border-white/10 shadow-md">
         <div class="w-full h-full bg-slate-950 rounded-[11px] flex items-center justify-center font-black text-white text-xs">EM</div>
       </div>
       <span class="text-sm font-extrabold text-white tracking-wider">EMA</span>
@@ -928,9 +928,9 @@
   <aside class="hidden md:flex w-[250px] min-w-[250px] bg-[#060913]/95 backdrop-blur-xl border-r border-white/[0.07] flex-col justify-between p-5 z-20">
     <div>
       <div class="flex items-center gap-3.5 px-1 pb-6 mb-3 border-b border-white/[0.06]">
-        <div class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-cyan-400 p-[1.5px] shadow-lg shadow-indigo-500/20 shrink-0">
+        <div class="w-11 h-11 rounded-2xl bg-slate-800 border border-white/10 shadow-md shrink-0">
           <div class="w-full h-full bg-[#080d1a] rounded-[14px] flex items-center justify-center">
-            <span class="text-sm font-black bg-gradient-to-r from-white via-indigo-200 to-cyan-300 bg-clip-text text-transparent">EMA</span>
+            <span class="text-sm font-black text-white">EMA</span>
           </div>
         </div>
         <div class="overflow-hidden leading-tight">
@@ -940,7 +940,7 @@
       </div>
 
       <nav class="space-y-1.5">
-        <button onclick="switchTab('tab-dashboard')" id="btn-tab-dashboard" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-lg shadow-indigo-600/30">
+        <button onclick="switchTab('tab-dashboard')" id="btn-tab-dashboard" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-slate-800 text-white border border-white/10">
           <i data-lucide="layout-dashboard" class="w-4 h-4 text-cyan-300"></i>
           <span>Dashboard</span>
         </button>
@@ -1007,7 +1007,7 @@
       </div>
 
       <div class="flex items-center gap-3">
-        <button id="ema-quick-actions" type="button" onclick="openQuickPalette()" class="btn-action hidden sm:flex items-center gap-2 px-3 py-2 rounded-full glass-card text-xs text-slate-300" aria-label="Open quick actions">
+        <button id="ema-quick-actions" type="button" onclick="openQuickPalette()" class="btn-action hidden sm:flex items-center gap-2 px-3 py-2 rounded-lg glass-card text-xs text-slate-300" aria-label="Open quick actions">
           <i data-lucide="command" class="w-3.5 h-3.5 text-indigo-300"></i>
           <span class="text-[10px] text-slate-400">Quick</span>
           <kbd class="text-[9px] font-mono text-slate-500">Ctrl K</kbd>
@@ -1017,15 +1017,15 @@
           <span id="ema-connection-text">Online</span>
         </div>
 
-        <button onclick="toggleWorker()" class="btn-action flex items-center gap-2 px-3.5 py-2 rounded-full glass-card text-xs text-slate-300">
+        <button onclick="toggleWorker()" class="btn-action flex items-center gap-2 px-3.5 py-2 rounded-lg glass-card text-xs text-slate-300">
           <span id="header-worker-dot" class="w-2 h-2 rounded-full bg-emerald-400 glow-pulse"></span>
           <span class="hidden sm:inline text-slate-400 text-[11px]">System:</span>
           <span id="header-worker-text" class="font-bold text-white uppercase text-[11px] tracking-wide">Running</span>
         </button>
 
         <div class="relative z-50" id="user-menu-wrapper">
-          <button id="user-menu-btn" onclick="toggleUserMenu(event)" class="btn-action flex items-center gap-2.5 px-3 py-1.5 rounded-full glass-card hover:border-indigo-500/50">
-            <div id="header-avatar" class="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 to-cyan-400 flex items-center justify-center text-xs font-black text-white shadow-md">
+          <button id="user-menu-btn" onclick="toggleUserMenu(event)" class="btn-action flex items-center gap-2.5 px-3 py-1.5 rounded-xl glass-card hover:border-indigo-500/50">
+            <div id="header-avatar" class="w-7 h-7 rounded-full bg-slate-700 flex items-center justify-center text-xs font-black text-white shadow-md">
               U
             </div>
             <div class="text-left overflow-hidden">
@@ -1168,7 +1168,7 @@
               <h3 class="text-sm font-bold text-white tracking-tight">Multi-Inbox Management</h3>
               <p class="text-xs text-slate-400 mt-0.5">Toggle live monitoring or link additional Google accounts.</p>
             </div>
-            <button onclick="triggerAddAccount()" class="btn-action flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white text-xs font-bold shadow-md shadow-indigo-600/30">
+            <button onclick="triggerAddAccount()" class="btn-action flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold shadow-md shadow-indigo-600/30">
               <i data-lucide="plus" class="w-4 h-4"></i>
               <span>Add Google Inbox</span>
             </button>
@@ -1248,7 +1248,7 @@
               <span id="inspect-status-text" class="text-slate-200 font-semibold font-mono">Ready to inspect</span>
             </div>
             <div class="w-full bg-white/5 rounded-full h-2 overflow-hidden">
-              <div id="inspect-progress-bar" class="h-full bg-gradient-to-r from-indigo-500 via-cyan-400 to-emerald-400 rounded-full w-0 transition-all duration-300"></div>
+              <div id="inspect-progress-bar" class="h-full bg-slate-500 rounded-full w-0 transition-all duration-300"></div>
             </div>
           </div>
         </div>

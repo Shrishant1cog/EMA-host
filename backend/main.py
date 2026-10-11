@@ -552,7 +552,7 @@ def _frontend_uses_custom_https_domain(frontend_url: str) -> bool:
         return False
     if host in {"localhost", "127.0.0.1", "::1", "example.com", "www.example.com"}:
         return False
-    if host.endswith((".example", ".invalid", ".test", ".localhost")) or "your-owned-domain" in host:
+    if host.endswith((".example", ".invalid", ".test", ".localhost", ".example.com", ".example.net", ".example.org")) or "your-owned-domain" in host:
         return False
     # Hosting-provider subdomains are not custom domains. Production OAuth must
     # return to the domain owned/configured for the site, not a provider URL.

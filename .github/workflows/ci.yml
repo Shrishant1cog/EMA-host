@@ -48,5 +48,13 @@ jobs:
       - name: Run frontend smoke tests
         run: python tools/frontend_smoke_test.py
 
+      - name: Install Playwright Chromium for responsive QA
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Run responsive browser QA
+        run: python tools/responsive_qa.py
+
       - name: Run UX contract tests
         run: python tools/ux_contract_test.py

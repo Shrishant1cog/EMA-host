@@ -5,9 +5,11 @@ on:
     branches:
       - main
       - fix/ema-audit-remediation
+      - fix/ema-followup-audit-2026-10
   pull_request:
     branches:
       - main
+      - fix/ema-audit-remediation
   workflow_dispatch:
 
 permissions:

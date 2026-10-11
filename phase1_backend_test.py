@@ -23,6 +23,8 @@ checks={
  'no_destructive_history_drop':'DROP TABLE IF EXISTS email_actions' not in (ROOT/'backend/utils/state_tracker.py').read_text(encoding='utf-8'),
  'expired_session_not_revived':'if not is_user_session_valid(sid):' in main and 'return is_user_session_valid(clean, db_path)' in (ROOT/'backend/utils/state_tracker.py').read_text(encoding='utf-8'),
  'oauth_state_not_bearer_session':'oauth_state = secrets.token_urlsafe(32)' in main and '"state": oauth_state' in main and 'state=sid' not in main[main.find('def auth_login'):main.find('def auth_callback')],
+ 'launch_oauth_url_has_no_session_id':'/auth/login?flow_id=' in main[main.find('def launch_browser_auth'):main.find('@app.get("/auth/login")')] and 'session_id=' not in main[main.find('def launch_browser_auth'):main.find('@app.get("/auth/login")')],
+ 'legacy_account_worker_compat':'if not a.get("session_id")' in main[main.find('def background_worker_loop'):main.find('def _background_worker_entry')] and 'not a.get("session_id")' in main[main.find('def _has_any_active_worker_scope'):main.find('def background_worker_loop')],
  'no_session_id_in_accounts_api':'safe_accounts = [{k: v for k, v in a.items() if k != "session_id"}' in main and 'return {"accounts": accounts}' not in main[main.find('def list_accounts'):main.find('class AccountTogglePayload')],
  'profile_save_checks_persistence':'Profile name could not be saved' in main and 'set_drive_settings(acc["email"], {"custom_display_name": clean_name})' in main,
  'worker_pause_is_persisted':'set_drive_settings(acc["email"], {"worker_enabled": "false"})' in main and 'set_drive_settings(acc["email"], {"worker_enabled": "true"})' in main,

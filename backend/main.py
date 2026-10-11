@@ -2691,7 +2691,16 @@ def exchange_auth_transfer_ticket(payload: AuthTransferPayload, request: Request
     expected = urlparse(frontend_url)
     expected_origin = f"{expected.scheme}://{expected.netloc}" if expected.scheme and expected.netloc else ""
     supplied_origin = str(request.headers.get("origin") or "").strip().rstrip("/")
-    if not expected_origin or not supplied_origin or not hmac.compare_digest(supplied_origin, expected_origin):
+    allowed_origins = {expected_origin} if expected_origin else set()
+    production_mode = (
+        os.getenv("RENDER", "").strip().lower() == "true"
+        or os.getenv("EMA_ENV", "").strip().lower() in {"production", "prod"}
+    )
+    if not production_mode and expected_origin in {"http://localhost:5500", "http://127.0.0.1:5500"}:
+        allowed_origins.update({"http://localhost:5500", "http://127.0.0.1:5500"})
+    if not supplied_origin or not any(
+        hmac.compare_digest(supplied_origin, allowed) for allowed in allowed_origins
+    ):
         raise HTTPException(status_code=403, detail="Invalid authentication transfer origin.")
 
     transfer = _consume_auth_transfer_ticket(payload.ticket)

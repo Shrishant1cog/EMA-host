@@ -174,8 +174,16 @@ def is_user_session_valid(session_id: str, db_path: Path = DEFAULT_DB_PATH) -> b
         except Exception:
             valid = False
         if not valid:
-            conn.execute("DELETE FROM user_sessions WHERE session_hash = ?", (key,))
-            conn.commit()
+            # Keep expired session rows while an account still references the raw
+            # session ID. Otherwise ensure_legacy_session could mistake an expired
+            # session for a pre-migration session and silently revive it.
+            linked_account = conn.execute(
+                "SELECT 1 FROM google_accounts WHERE session_id = ? LIMIT 1",
+                (clean,),
+            ).fetchone()
+            if not linked_account:
+                conn.execute("DELETE FROM user_sessions WHERE session_hash = ?", (key,))
+                conn.commit()
         return valid
     finally:
         conn.close()
@@ -299,6 +307,7 @@ def count_active_user_sessions(
 
 
 def ensure_legacy_session(session_id: str, db_path: Path = DEFAULT_DB_PATH) -> bool:
+    """Migrate pre-session-table accounts only; never recreate a known expired session."""
     clean = str(session_id or "").strip()
     if not clean:
         return False
@@ -307,10 +316,21 @@ def ensure_legacy_session(session_id: str, db_path: Path = DEFAULT_DB_PATH) -> b
     init_db(db_path)
     conn = get_db_connection(db_path)
     try:
-        row = conn.execute("SELECT 1 FROM google_accounts WHERE session_id = ? LIMIT 1", (clean,)).fetchone()
+        # A row that exists but is expired or malformed is a revoked/expired
+        # session, not a legacy session eligible for migration.
+        session_row = conn.execute(
+            "SELECT expires_at FROM user_sessions WHERE session_hash = ?",
+            (_session_hash(clean),),
+        ).fetchone()
+        if session_row:
+            return False
+        account_row = conn.execute(
+            "SELECT 1 FROM google_accounts WHERE session_id = ? LIMIT 1",
+            (clean,),
+        ).fetchone()
     finally:
         conn.close()
-    return create_user_session(clean, db_path=db_path) if row else False
+    return create_user_session(clean, db_path=db_path) if account_row else False
 
 
 def upsert_google_account(

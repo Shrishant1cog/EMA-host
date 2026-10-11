@@ -550,7 +550,9 @@ def _frontend_uses_custom_https_domain(frontend_url: str) -> bool:
     host = (parsed.hostname or "").lower().rstrip(".")
     if parsed.scheme.lower() != "https" or not host or "." not in host:
         return False
-    if host in {"localhost", "127.0.0.1", "::1"}:
+    if host in {"localhost", "127.0.0.1", "::1", "example.com", "www.example.com"}:
+        return False
+    if host.endswith((".example", ".invalid", ".test", ".localhost")) or "your-owned-domain" in host:
         return False
     # Hosting-provider subdomains are not custom domains. Production OAuth must
     # return to the domain owned/configured for the site, not a provider URL.
@@ -591,8 +593,13 @@ def health_check():
     custom_domain_required = os.getenv(
         "EMA_REQUIRE_CUSTOM_DOMAIN", "true" if production_mode else "false"
     ).strip().lower() in {"1", "true", "yes", "on"}
-    custom_domain_configured = _frontend_uses_custom_https_domain(
-        getattr(config, "FRONTEND_URL", "")
+    frontend_origin = str(getattr(config, "FRONTEND_URL", "") or "").strip()
+    frontend_host = (urlparse(frontend_origin).hostname or "").lower().rstrip(".")
+    expected_custom_host = os.getenv("EMA_CUSTOM_DOMAIN_HOST", "").strip().lower().rstrip(".")
+    custom_domain_configured = bool(
+        _frontend_uses_custom_https_domain(frontend_origin)
+        and expected_custom_host
+        and hmac.compare_digest(frontend_host, expected_custom_host)
     )
     google_oauth_configured = bool(
         getattr(config, "GOOGLE_CLIENT_ID", "").strip()

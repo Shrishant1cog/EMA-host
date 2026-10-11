@@ -40,6 +40,7 @@ checks={
  'launch_browser_reserves_auth_flow':'set_auth_flow(sid, status="pending", redirect_uri=get_dynamic_redirect_uri(request)' in main,
  'stale_oauth_flow_expires':'time.time() - float(flow.get("timestamp", 0) or 0) > 900' in main,
  'oauth_waiter_handles_idle_status':'data.status === "failed" || data.status === "idle"' in main,
+ 'temporal_gate_checks_body':'email_body=safe_body' in (ROOT/'backend/services/ai_service.py').read_text(encoding='utf-8'),
  'worker_ui_enabled_requires_monitored_account':'any(bool(a.get("is_monitored")) for a in session_accs) and _session_worker_enabled(sid)' in main,
 
 }

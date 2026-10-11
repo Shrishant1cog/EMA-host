@@ -17,7 +17,7 @@ checks['admin_entry_not_autoplay']='autoplay' not in adm[adm.find('<video'):adm.
 checks['admin_entry_starts_after_auth']='playEntry();await bootAfterAuth()' in adjs and 'hideLogin();showShell();playEntry();return true' in adjs
 checks['no_duplicate_js_session_cookie']='document.cookie' not in idx and 'document.cookie' not in login
 checks['admin_cookie_local_http_safe']='def _admin_cookie_secure(request: Request)' in main and 'if scheme != "https":\n        return False' in main
-checks['session_legacy_migration']='ensure_legacy_session' in main and 'if len(clean) < 8' in st
+checks['expired_session_not_reactivated']='if not is_user_session_valid(sid):' in main and 'return []' in main[main.find('def get_accounts_for_session'):main.find('def verify_account_ownership')] and 'return is_user_session_valid(clean, db_path)' in st
 checks['dark_only_backend']="theme_mode must be 'dark' or 'read'" in main
 checks['dark_only_frontend']='theme-btn-light' not in idx and 'value="light"' not in idx
 checks['video_present']=video.exists() and video.stat().st_size>0

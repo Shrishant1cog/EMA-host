@@ -7,6 +7,10 @@ idx=(F/'index.html').read_text(encoding='utf-8')
 login=(F/'login.html').read_text(encoding='utf-8')
 adm=(F/'admin/index.html').read_text(encoding='utf-8')
 adjs=(F/'admin/admin.js').read_text(encoding='utf-8')
+privacy=(F/'privacy.html').read_text(encoding='utf-8')
+terms=(F/'terms.html').read_text(encoding='utf-8')
+site_js=(F/'main.js').read_text(encoding='utf-8')
+ux_js=(F/'ux-pro.js').read_text(encoding='utf-8')
 main=(B/'main.py').read_text(encoding='utf-8')
 st=(B/'utils/state_tracker.py').read_text(encoding='utf-8')
 video=F/'assets/ema-entry.mp4'
@@ -16,7 +20,7 @@ adapter=(B/'services/drive_state_adapter.py').read_text(encoding='utf-8')
 styles=(F/'styles.css').read_text(encoding='utf-8')
 uxcss=(F/'ux-pro.css').read_text(encoding='utf-8')
 admin_css=(F/'admin/admin.css').read_text(encoding='utf-8')
-ui_source='\n'.join([idx, login, adm, adjs, styles, uxcss, admin_css])
+ui_source='\n'.join([idx, login, privacy, terms, adm, adjs, site_js, ux_js, styles, uxcss, admin_css])
 gradient_defs=re.findall(r'(?:linear|radial|conic)-gradient[(][^;{}]*', ui_source, re.I)
 checks['no_purple_gradient_defs']=not any(re.search(r'indigo|violet|purple|99,\s*102,\s*241|129,\s*140,\s*248|#6366f1|#4f46e5|#818cf8',g,re.I) for g in gradient_defs)
 checks['no_purple_tailwind_gradients']=not re.search(r'bg-gradient-to-[^"]*(?:indigo|violet|purple)',ui_source,re.I)
@@ -28,6 +32,9 @@ def css_block(source, selector):
     end=source.find('}',start)
     return source[start:end+1] if end>=0 else source[start:]
 checks['no_pill_shaped_ctas']=all('border-radius: 999px' not in css_block(styles, selector) for selector in ('.nav-pill', '.sign-in-btn', '.cta-btn', '.mobile-sign-in'))
+button_tags=re.findall(r'<button\\b[^>]*>', ui_source, re.I)
+pill_action_buttons=[tag for tag in button_tags if 'rounded-full' in tag.lower() and not re.search(r'class="[^"]*\\bh-5\\s+w-(?:9|10)\\b', tag)]
+checks['no_pill_shaped_action_buttons']=not pill_action_buttons
 checks['netlify_proxies_api_auth_and_health']=all(x in netlify for x in ('from = "/api/*"','to = "https://ema-host.onrender.com/api/:splat"','from = "/auth/*"','to = "https://ema-host.onrender.com/auth/:splat"','from = "/health"','status = 200','force = true'))
 checks['render_pins_persistent_single_instance']='numInstances: 1' in render and 'mountPath: /var/data' in render and 'DB_PATH' in render and '/var/data/assistant.db' in render
 checks['uvicorn_access_logs_disabled']='--no-access-log' in render

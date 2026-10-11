@@ -285,6 +285,21 @@ def commit_drive_state(email: str) -> bool:
             logger.warning(f"Could not commit state to Google Drive for {clean_email}: {e}")
             return False
 
+def get_drive_failed_email_ids(email: str, limit: int = _PROCESSED_ID_LIMIT) -> List[str]:
+    """Return retryable failed Gmail message IDs from this account's persisted EMA state."""
+    if not email or not email.strip():
+        return []
+    clean_email = email.strip().lower()
+    state = load_drive_state(clean_email)
+    try:
+        safe_limit = min(max(int(limit), 1), _PROCESSED_ID_LIMIT)
+    except (TypeError, ValueError):
+        safe_limit = _PROCESSED_ID_LIMIT
+    with _CACHE_LOCK:
+        values = state.get("failed_email_ids", [])
+        return [str(x) for x in values if x][-safe_limit:]
+
+
 def is_email_processed_drive(email: str, email_id: str) -> bool:
     if not email or not email.strip():
         return False

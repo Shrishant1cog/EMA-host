@@ -53,6 +53,8 @@ checks['no_cursor_tracking_handlers'] = all(
 checks['no_injected_marketing_block'] = 'ema-pro-welcome' not in uxjs and '/ux-pro.js' not in idx
 checks['no_remote_google_font_dependency'] = all('fonts.googleapis.com' not in page for page in public_pages.values())
 checks['responsive_flat_design_overrides'] = 'prefers-reduced-motion:reduce' in idx and 'background-image:none!important' in idx and 'button:focus-visible' in login
+admin_css = (F/'admin/admin.css').read_text(encoding='utf-8')
+checks['no_invisible_gradient_text'] = 'text-transparent' not in idx and '.login-hero h1 em' in admin_css and '-webkit-text-fill-color:#edf2f7!important' in admin_css
 low_power_gate = idx.find('if (lowPower)')
 video_load = idx.find('video.load()', low_power_gate if low_power_gate >= 0 else 0)
 checks['intro_video_skipped_on_low_resource_devices'] = low_power_gate >= 0 and video_load > low_power_gate and 'navigator.connection?.saveData' in idx

@@ -165,8 +165,7 @@ with tempfile.TemporaryDirectory() as temp_dir:
     finally:
         conn.close()
     assert not state_tracker.is_user_session_valid(sid, db_path=test_db)
-    assert not state_tracker.ensure_legacy_session(sid, db_path=test_db), \\
-        'Expired session was revived by legacy migration'
+    assert not state_tracker.ensure_legacy_session(sid, db_path=test_db), 'Expired session was revived by legacy migration'
     conn = state_tracker.get_db_connection(test_db)
     try:
         row = conn.execute(

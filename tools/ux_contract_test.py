@@ -15,6 +15,9 @@ checks['user_entry_not_autoplay_before_auth']='preload="none"' in idx and not ('
 checks['admin_entry_hidden']='id="entry" hidden' in adm
 checks['admin_entry_not_autoplay']='autoplay' not in adm[adm.find('<video'):adm.find('</video>')]
 checks['admin_entry_starts_after_auth']='playEntry();await bootAfterAuth()' in adjs and 'hideLogin();showShell();playEntry();return true' in adjs
+checks['attachment_links_require_safe_http_urls']="function safeHttpUrl(value)" in idx and 'href="${escapeHtml(safeUrl)}"' in idx and 'rel="noopener noreferrer"' in idx
+checks['account_controls_avoid_dynamic_inline_js']="onclick=\"toggleAccount('${acc.email}'" not in idx and "onclick=\"signOutSpecificAccount('${acc.email}'" not in idx and 'data-toggle-email=' in idx and 'data-disconnect-email=' in idx
+checks['calendar_select_escapes_email_attributes']='option value="${escapeHtml(a.email)}"' in idx
 checks['no_duplicate_js_session_cookie']='document.cookie' not in idx and 'document.cookie' not in login
 checks['admin_cookie_local_http_safe']='def _admin_cookie_secure(request: Request)' in main and 'if scheme != "https":\n        return False' in main
 checks['expired_session_not_reactivated']='if not is_user_session_valid(sid):' in main and 'return []' in main[main.find('def get_accounts_for_session'):main.find('def verify_account_ownership')] and 'return is_user_session_valid(clean, db_path)' in st

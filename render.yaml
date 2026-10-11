@@ -38,6 +38,8 @@ services:
         value: "1"
       - key: FRONTEND_URL
         sync: false
+      - key: EMA_CUSTOM_DOMAIN_HOST
+        sync: false
       - key: BACKEND_URL
         sync: false
       - key: REDIRECT_URI

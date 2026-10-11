@@ -343,7 +343,7 @@ def create_or_update_event(
     # 4. Format Attachments
     drive_attachments = []
     if attachments:
-        description_lines.append("\n📎 Attached Evidence / Documents:")
+        description_lines.append("\nAttached evidence and documents:")
         for att in attachments:
             name = att.get("name") or att.get("title") or att.get("filename") or "Document"
             file_id = att.get("id") or att.get("fileId")

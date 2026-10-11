@@ -1,6 +1,7 @@
 import io
 import json
 import copy
+import hashlib
 import logging
 import threading
 from pathlib import Path
@@ -69,31 +70,90 @@ def _get_commit_lock(email: str) -> threading.RLock:
         return _COMMIT_LOCKS[clean]
 
 
+def _safe_shadow_stem(email: str) -> str:
+    return "".join(c if c.isalnum() else "_" for c in str(email or "").strip().lower())
+
+
+def _get_legacy_shadow_path(email: str) -> Path:
+    # Legacy path is retained only for a verified one-time migration.
+    return BASE_DIR / f".state_shadow_{_safe_shadow_stem(email)}.json"
+
+
 def _get_shadow_path(email: str) -> Path:
-    safe_name = "".join(c if c.isalnum() else "_" for c in email.lower())
-    return BASE_DIR / f".state_shadow_{safe_name}.json"
+    clean = str(email or "").strip().lower()
+    digest = hashlib.sha256(clean.encode("utf-8")).hexdigest()[:20]
+    # The digest prevents punctuation-normalization collisions between addresses.
+    return BASE_DIR / f".state_shadow_{_safe_shadow_stem(clean)}_{digest}.json"
+
+
+def _shadow_actions_belong_to_email(data: Dict[str, Any], clean_email: str) -> bool:
+    actions = data.get("email_actions")
+    if not isinstance(actions, list) or not actions:
+        return False
+    return all(
+        isinstance(action, dict)
+        and str(action.get("account_email") or "").strip().lower() == clean_email
+        for action in actions
+    )
 
 
 def _load_local_shadow(email: str) -> Optional[Dict[str, Any]]:
-    path = _get_shadow_path(email)
+    clean_email = str(email or "").strip().lower()
+    if not clean_email:
+        return None
+
+    path = _get_shadow_path(clean_email)
     if path.exists():
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                if isinstance(data, dict):
-                    return data
-        except Exception:
-            pass
-    return None
+            if not isinstance(data, dict) or str(data.get("_shadow_account_email") or "").strip().lower() != clean_email:
+                logger.warning("Refusing to load a local state shadow with an absent or mismatched owner marker.")
+                return None
+            data.pop("_shadow_account_email", None)
+            return data
+        except Exception as exc:
+            logger.warning("Could not read the local state shadow for %s: %s", clean_email, type(exc).__name__)
+            return None
+
+    # Old filenames could collide after punctuation was replaced with underscores.
+    # Migrate only when the file carries a verified owner marker or every retained
+    # action has an explicit matching account email; otherwise ignore it safely.
+    legacy_path = _get_legacy_shadow_path(clean_email)
+    if not legacy_path.exists():
+        return None
+    try:
+        with open(legacy_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return None
+        marked_owner = str(data.get("_shadow_account_email") or "").strip().lower()
+        verified = marked_owner == clean_email or (
+            not marked_owner and _shadow_actions_belong_to_email(data, clean_email)
+        )
+        if not verified:
+            logger.warning("Refusing to migrate an ambiguous legacy state shadow for %s.", clean_email)
+            return None
+        data.pop("_shadow_account_email", None)
+        _save_local_shadow(clean_email, data)
+        return data
+    except Exception as exc:
+        logger.warning("Could not migrate the legacy state shadow for %s: %s", clean_email, type(exc).__name__)
+        return None
 
 
 def _save_local_shadow(email: str, state: Dict[str, Any]):
-    path = _get_shadow_path(email)
+    clean_email = str(email or "").strip().lower()
+    if not clean_email or not isinstance(state, dict):
+        return
+    path = _get_shadow_path(clean_email)
     try:
+        payload = dict(state)
+        payload["_shadow_account_email"] = clean_email
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(state, f, separators=(',', ':'))
+            json.dump(payload, f, separators=(',', ':'))
     except Exception as e:
-        logger.debug(f"Shadow save error for {email}: {e}")
+        logger.debug(f"Shadow save error for {clean_email}: {e}")
 
 
 def _get_or_create_state_file_id(drive_service, email: str) -> str:

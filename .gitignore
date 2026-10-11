@@ -32,3 +32,4 @@ Thumbs.db
 !.env.example
 !.env.*.example
 assistant_v2.db*
+.ema-state-shadows/

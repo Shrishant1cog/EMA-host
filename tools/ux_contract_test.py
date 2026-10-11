@@ -31,6 +31,8 @@ checks['admin_entry_hidden']='id="entry" hidden' in adm
 checks['admin_entry_not_autoplay']='autoplay' not in adm[adm.find('<video'):adm.find('</video>')]
 checks['admin_entry_starts_after_auth']='playEntry();await bootAfterAuth()' in adjs and 'hideLogin();showShell();playEntry();return true' in adjs
 checks['attachment_links_require_safe_http_urls']="function safeHttpUrl(value)" in idx and 'href="${escapeHtml(safeUrl)}"' in idx and 'rel="noopener noreferrer"' in idx
+checks['calendar_event_handlers_are_not_inline']='onclick="onEventCardClick(' not in idx and "onclick="+'"'+"event.stopPropagation(); openEventDetailModal(" not in idx and 'data-event-card-id=' in idx and 'data-event-detail-id=' in idx
+checks['external_calendar_link_is_validated']='const calendarLink = safeHttpUrl(ev.htmlLink)' in idx and 'openCalendarButton.rel = \'noopener noreferrer\'' in idx
 checks['account_controls_avoid_dynamic_inline_js']="onclick=\"toggleAccount('${acc.email}'" not in idx and "onclick=\"signOutSpecificAccount('${acc.email}'" not in idx and 'data-toggle-email=' in idx and 'data-disconnect-email=' in idx
 checks['calendar_select_escapes_email_attributes']='option value="${escapeHtml(a.email)}"' in idx
 checks['no_duplicate_js_session_cookie']='document.cookie' not in idx and 'document.cookie' not in login

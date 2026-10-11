@@ -86,17 +86,6 @@ def _get_shadow_path(email: str) -> Path:
     return BASE_DIR / f".state_shadow_{_safe_shadow_stem(clean)}_{digest}.json"
 
 
-def _shadow_actions_belong_to_email(data: Dict[str, Any], clean_email: str) -> bool:
-    actions = data.get("email_actions")
-    if not isinstance(actions, list) or not actions:
-        return False
-    return all(
-        isinstance(action, dict)
-        and str(action.get("account_email") or "").strip().lower() == clean_email
-        for action in actions
-    )
-
-
 def _load_local_shadow(email: str) -> Optional[Dict[str, Any]]:
     clean_email = str(email or "").strip().lower()
     if not clean_email:
@@ -117,8 +106,9 @@ def _load_local_shadow(email: str) -> Optional[Dict[str, Any]]:
             return None
 
     # Old filenames could collide after punctuation was replaced with underscores.
-    # Migrate only when the file carries a verified owner marker or every retained
-    # action has an explicit matching account email; otherwise ignore it safely.
+    # The legacy format did not store an owner marker, so its settings/stats cannot
+    # be trusted even when the last retained actions appear to belong to one email.
+    # Migrate only a legacy file written with an exact owner marker.
     legacy_path = _get_legacy_shadow_path(clean_email)
     if not legacy_path.exists():
         return None
@@ -128,9 +118,7 @@ def _load_local_shadow(email: str) -> Optional[Dict[str, Any]]:
         if not isinstance(data, dict):
             return None
         marked_owner = str(data.get("_shadow_account_email") or "").strip().lower()
-        verified = marked_owner == clean_email or (
-            not marked_owner and _shadow_actions_belong_to_email(data, clean_email)
-        )
+        verified = marked_owner == clean_email
         if not verified:
             logger.warning("Refusing to migrate an ambiguous legacy state shadow for %s.", clean_email)
             return None

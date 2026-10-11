@@ -26,6 +26,14 @@ assert no_time["events"]==[], "events without source temporal evidence must fail
 with_time=ai_service._hard_gate({"category":"Meeting & Event","events":[{"title":"meeting","start":"2026-10-01T10:00:00+05:30","end":"2026-10-01T11:00:00+05:30"}]},"meeting tomorrow","person@example.com","","09:00",0.5,"2026-09-30T10:00:00+05:30",False,"Asia/Kolkata")
 assert len(with_time["events"])==1
 
+# Meeting provider detection must match actual hostname boundaries, not substrings.
+assert ai_service._trusted_meeting_provider('meet.google.com') == 'Google Meet'
+assert ai_service._trusted_meeting_provider('us02web.zoom.us') == 'Zoom'
+assert ai_service._trusted_meeting_provider('meet.google.com.attacker.example') is None
+assert ai_service._trusted_meeting_provider('notzoom.us.attacker.example') is None
+assert ai_service._extract_meeting_url('Join at https://meet.google.com/abc-defg-hij') == 'https://meet.google.com/abc-defg-hij'
+assert ai_service._extract_meeting_url('Join at https://meet.google.com.attacker.example/abc') is None
+
 # Calendar invalid datetime must reject instead of inventing a future event.
 try:
     calendar_service._format_datetime_for_google('not-a-datetime','Asia/Kolkata')

@@ -46,6 +46,9 @@ checks['external_calendar_link_is_validated']='const calendarLink = safeHttpUrl(
 checks['account_controls_avoid_dynamic_inline_js']="onclick=\"toggleAccount('${acc.email}'" not in idx and "onclick=\"signOutSpecificAccount('${acc.email}'" not in idx and 'data-toggle-email=' in idx and 'data-disconnect-email=' in idx
 checks['calendar_select_escapes_email_attributes']='option value="${escapeHtml(a.email)}"' in idx
 checks['no_duplicate_js_session_cookie']='document.cookie' not in idx and 'document.cookie' not in login
+checks['user_session_is_httponly_cookie_not_localstorage']="const getSessionId = () => \"\"" in idx and 'localStorage.setItem(SESSION_KEY' not in idx and 'localStorage.getItem(SESSION_KEY' not in idx and 'localStorage.getItem(SESSION_KEY' not in login
+checks['oauth_transfer_ticket_exchanged_once']='ema_ticket' in idx and '/api/auth/exchange' in idx and 'credentials: \'include\'' in idx and 'history.replaceState(null, \'\', location.pathname + location.search)' in idx
+checks['no_long_lived_session_fragment']='ema_session=' not in main[main.find('def auth_callback'):main.find('def _clear_session_cookie')] and '#ema_ticket=' in main
 checks['admin_cookie_local_http_safe']='def _admin_cookie_secure(request: Request)' in main and 'if scheme != "https":\n        return False' in main
 checks['expired_session_not_reactivated']='if not is_user_session_valid(sid):' in main and 'return []' in main[main.find('def get_accounts_for_session'):main.find('def verify_account_ownership')] and 'return is_user_session_valid(clean, db_path)' in st
 checks['dark_only_backend']="theme_mode must be 'dark' or 'read'" in main

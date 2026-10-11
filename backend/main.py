@@ -2884,7 +2884,7 @@ def get_stats(request: Request):
         },
         "worker": {
             "is_running": WORKER_STATE["is_running"],
-            "user_enabled": bool(session_accs) and all(_session_worker_enabled(a.get("session_id")) for a in session_accs),
+            "user_enabled": any(bool(a.get("is_monitored")) for a in session_accs) and _session_worker_enabled(sid),
             "status": WORKER_STATE["current_status"],
             "last_sync": WORKER_STATE["last_sync"],
         },

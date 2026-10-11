@@ -2150,8 +2150,8 @@ def auth_login(
         set_auth_flow(completion_flow_id, status="pending", session_id=sid, error=None)
         hint_param = f"&email={quote(email.strip().lower(), safe='')}" if email else ""
         chrome_target = (
-            f"http://127.0.0.1:8000/auth/login?session_id={quote(sid, safe='')}"
-            f"&flow_id={quote(completion_flow_id, safe='')}&browser=1{hint_param}"
+            f"http://127.0.0.1:8000/auth/login?"
+            f"flow_id={quote(completion_flow_id, safe='')}&browser=1{hint_param}"
         )
         open_in_chrome_or_default(chrome_target)
         waiting_html = f"""

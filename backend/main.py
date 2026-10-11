@@ -550,7 +550,12 @@ def _frontend_uses_custom_https_domain(frontend_url: str) -> bool:
     host = (parsed.hostname or "").lower().rstrip(".")
     if parsed.scheme.lower() != "https" or not host or "." not in host:
         return False
-    if host in {"localhost", "127.0.0.1", "::1", "example.com", "www.example.com"}:
+    if host in {
+        "localhost", "127.0.0.1", "::1",
+        "example.com", "www.example.com",
+        "example.net", "www.example.net",
+        "example.org", "www.example.org",
+    }:
         return False
     if host.endswith((".example", ".invalid", ".test", ".localhost", ".example.com", ".example.net", ".example.org")) or "your-owned-domain" in host:
         return False

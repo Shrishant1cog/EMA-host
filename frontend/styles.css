@@ -127,14 +127,14 @@ html, body {
   display: block;
 }
 
-/* Nav Pill */
+/* Navigation container */
 .nav-pill {
   flex: 1;
   max-width: 430px;
   height: clamp(44px, 5.2vw, 48px);
   background: #ffffff;
   box-shadow: var(--nav-shadow);
-  border-radius: 999px;
+  border-radius: 12px;
   padding: 4px 8px;
   display: flex;
   align-items: center;
@@ -175,12 +175,12 @@ html, body {
   box-shadow: -5px 0 0 #000000, 5px 0 0 #000000;
 }
 
-/* Sign In Pill */
+/* Sign In Button */
 .sign-in-btn {
   height: clamp(44px, 5.2vw, 48px);
   background: var(--pill-dark);
   color: var(--sign-in-text);
-  border-radius: 999px;
+  border-radius: 10px;
   box-shadow: var(--nav-shadow);
   padding: 0 clamp(18px, 2.2vw, 24px);
   display: inline-flex;
@@ -358,7 +358,7 @@ html, body {
   font-weight: 600;
   font-size: clamp(13.5px, 1.5vw, 14.5px);
   padding: clamp(11px, 1.6vh, 13px) clamp(22px, 3vw, 28px);
-  border-radius: 999px;
+  border-radius: 10px;
   text-decoration: none;
   box-shadow: 0 0 0 1px rgba(255,255,255,0.15),
               0 0 22px rgba(255,255,255,0.32),
@@ -540,7 +540,7 @@ html, body {
   height: 48px;
   background: var(--pill-dark);
   color: #ffffff;
-  border-radius: 999px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;

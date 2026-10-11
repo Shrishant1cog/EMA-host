@@ -2209,7 +2209,7 @@ def auth_login(
         supplied_sid = ""
     flow_key = str(flow_id or "").strip()
     bootstrap_flow = consume_auth_bootstrap_flow(flow_key) if flow_key else None
-    if flow_key and not bootstrap_flow and not existing_accounts:
+    if flow_key and not bootstrap_flow:
         return HTMLResponse(
             "This sign-in link has expired or was already used. Please start Google sign-in again.",
             status_code=400,

@@ -871,6 +871,7 @@ def background_worker_loop():
     IDLE_SLEEP = 60
     ACTIVE_SLEEP = 15
     EMAIL_BATCH_SIZE = 5
+    MAX_FAILED_RETRIES_PER_ACCOUNT_TICK = 1
     GMAIL_PAGE_SIZE = 100
     MAX_PAGES_PER_ACCOUNT_TICK = 50
     SYNC_CURSOR_OVERLAP_SECONDS = 120
@@ -926,7 +927,7 @@ def background_worker_loop():
                     now = time.time()
                     failed_ids = get_drive_failed_email_ids(acc_email, limit=5000)
                     for failed_id in failed_ids:
-                        if len(candidates) >= EMAIL_BATCH_SIZE or WORKER_STATE["stop_event"].is_set():
+                        if len(candidates) >= MAX_FAILED_RETRIES_PER_ACCOUNT_TICK or WORKER_STATE["stop_event"].is_set():
                             break
                         mid = str(failed_id)
                         retry_at, _ = _get_email_retry_state(acc_email, mid)

@@ -2,20 +2,18 @@
 <html lang="en" class="dark">
 <head>
   <meta charset="UTF-8" />
-  <title>EMA • Autonomous Inbox Intelligence</title>
+  <title>EMA | Inbox and Calendar Automation</title>
+  <meta name="description" content="Review dates and meeting details extracted from connected Gmail messages and manage related Google Calendar events.">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#040711" />
   <meta name="color-scheme" content="dark" />
   <meta name="application-name" content="EMA Autonomous Inbox Intelligence" />
-  <meta name="version" content="2026.09.30" />
+  <meta name="version" content="2026.10.11" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 
-  <!-- Fonts: Plus Jakarta Sans & JetBrains Mono -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- System fonts keep the interface responsive and avoid blocking font requests. -->
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -122,8 +120,8 @@
       theme: {
         extend: {
           fontFamily: {
-            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
-            mono: ['"JetBrains Mono"', 'monospace'],
+            sans: ['system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+            mono: ['ui-monospace', 'SFMono-Regular', 'Consolas', 'monospace'],
           },
           colors: {
             emaDark: 'var(--ema-bg)',
@@ -558,7 +556,36 @@
       #tab-emails .flex.items-center.gap-2.overflow-x-auto{scrollbar-width:none;}
     }
     @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important;}}
-  </style>
+  
+    /* EMA 2.0.1 visual and performance guardrails */
+    :root { --ema-bg:#080c12; --ema-main:#0c1118; --ema-card:#111820; --ema-border:#293440; --ema-text:#edf2f7; --ema-subtext:#a6b1bd; --ema-ambient:#080c12; }
+    [data-theme="dark"] { --ema-bg:#080c12; --ema-main:#0c1118; --ema-card:#111820; --ema-border:#293440; --ema-text:#edf2f7; --ema-subtext:#a6b1bd; --ema-ambient:#080c12; }
+    body, .ambient-mesh { background:#080c12!important; background-image:none!important; }
+    .glass-card { background:#111820!important; border:1px solid #293440!important; border-radius:8px!important; box-shadow:none!important; backdrop-filter:none!important; -webkit-backdrop-filter:none!important; }
+    .glass-card:hover { transform:none!important; box-shadow:none!important; border-color:#3a4654!important; }
+    .btn-action, .nav-btn { box-shadow:none!important; filter:none!important; transform:none!important; transition:background-color .15s ease,border-color .15s ease,color .15s ease!important; }
+    .tab-content-pane { animation:none!important; }
+    .selected-event-card { transform:none!important; box-shadow:0 0 0 1px #3a4654!important; border-color:#64748b!important; }
+    #ema-entry-video::after { background:rgba(0,0,0,.18)!important; }
+    #ema-entry-progress span { background:#94a3b8!important; box-shadow:none!important; }
+    .quick-palette { background:#0f141b!important; border-radius:8px!important; box-shadow:0 12px 28px rgba(0,0,0,.25)!important; animation:none!important; }
+    .quick-palette-item { border-radius:6px!important; }
+    [class*="bg-gradient"] { background-image:none!important; }
+    [class*="text-purple-"] { color:#a6b1bd!important; }
+    [class*="bg-purple-"] { background-color:#1b242e!important; }
+    [class*="border-purple-"] { border-color:#354353!important; }
+    button:not(#btn-file-toggle):not(#btn-design-toggle):not([onclick^="toggleAccount("]):not([onclick^="toggleOnlyFilesSetting("]):not([onclick^="toggleDesignEventsSetting("]) { border-radius:6px!important; box-shadow:none!important; }
+    a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible { outline:2px solid #93c5fd!important; outline-offset:2px; }
+    @media(max-width:767px) {
+      body { overflow:hidden; }
+      #app-main-scroll { min-width:0!important; }
+      #app-main-scroll>main { min-width:0!important; }
+      .glass-card { backdrop-filter:none!important; -webkit-backdrop-filter:none!important; }
+    }
+    @media(prefers-reduced-motion:reduce) {
+      *,*::before,*::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; }
+    }
+</style>
 </head>
 <body class="font-sans antialiased flex flex-col md:flex-row relative auth-pending">
 
@@ -914,9 +941,9 @@
 
     <div class="pt-4 border-t border-white/10 space-y-3">
       <div class="flex items-center justify-between text-xs text-slate-400">
-        <a href="/privacy.html" target="_blank" class="hover:underline">Privacy Policy</a>
+        <a href="/privacy.html" class="hover:underline">Privacy Policy</a>
         <span>•</span>
-        <a href="/terms.html" target="_blank" class="hover:underline">Terms of Service</a>
+        <a href="/terms.html" class="hover:underline">Terms of Service</a>
       </div>
       <button onclick="handleFullSignOut()" class="w-full py-2.5 rounded-xl bg-rose-500/20 text-rose-300 font-semibold text-xs border border-rose-500/30">
         Sign Out Completely
@@ -1003,7 +1030,7 @@
     <header class="relative z-30 px-6 sm:px-9 pt-6 pb-4 flex items-center justify-between gap-4 border-b border-white/[0.06] bg-[#040711]/85 backdrop-blur-md">
       <div>
         <h2 id="greeting-heading" class="text-xl sm:text-2xl font-black text-white tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">Welcome Back!</h2>
-        <p class="text-xs text-slate-400 mt-0.5">Your email stream is analyzed autonomously with private Drive synchronization.</p>
+        <p class="text-xs text-slate-400 mt-0.5">Review dates and meeting details extracted from your connected inboxes.</p>
       </div>
 
       <div class="flex items-center gap-3">
@@ -1600,7 +1627,7 @@
 
       const activeBtn = document.getElementById('btn-' + tabId);
       if (activeBtn) {
-        activeBtn.className = "nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-lg shadow-indigo-600/30";
+        activeBtn.className = "nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-md text-xs font-semibold bg-slate-700 border border-slate-600 text-white";
         activeBtn.setAttribute('aria-selected', 'true');
       }
 
@@ -2727,6 +2754,6 @@ async function toggleInspect() {
       }, 300000);
     });
   </script>
-  <script src="/ux-pro.js"></script>
+  
 </body>
 </html>

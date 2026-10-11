@@ -139,103 +139,116 @@ def find_duplicate_event(
     calendar_service,
     event: Union[CalendarEvent, Dict[str, Any], Any],
     calendar_id: str = "primary",
+    source_email_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """
-    Scans a 3-hour window (+/- 90 mins) in the target account's calendar using
-    title, meeting URL, and extended property signatures to prevent duplicates.
-    """
+    """Find the same scheduled occurrence, using Gmail source ID when available."""
     if not event or not calendar_service:
         return None
 
+    ev = _normalize_to_calendar_event(event)
+    if not ev.start:
+        return None
+
+    tz = _get_safe_zoneinfo(ev.timezone)
+    start_clean = str(ev.start).replace("Z", "+00:00")
     try:
-        ev = _normalize_to_calendar_event(event)
-        if not ev.start:
-            return None
-
-        tz = _get_safe_zoneinfo(ev.timezone)
-        start_clean = str(ev.start).replace("Z", "+00:00")
-
-        # Parse start into timezone-aware datetime
         if len(start_clean) == 10 and start_clean.count("-") == 2 and "T" not in start_clean:
-            start_dt = datetime.fromisoformat(start_clean).replace(
-                hour=9, minute=0, tzinfo=tz
-            )
+            start_dt = datetime.fromisoformat(start_clean).replace(hour=9, minute=0, tzinfo=tz)
         else:
             start_dt = parser.isoparse(start_clean)
             if start_dt.tzinfo is None:
                 start_dt = start_dt.replace(tzinfo=tz)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"Cannot check duplicate for invalid event start: {ev.start!r}") from exc
 
-        # Build strict RFC 3339 search boundaries
-        time_min = (start_dt - timedelta(minutes=90)).isoformat()
-        time_max = (start_dt + timedelta(minutes=90)).isoformat()
+    time_min = (start_dt - timedelta(minutes=90)).isoformat()
+    time_max = (start_dt + timedelta(minutes=90)).isoformat()
+    target_title = (ev.title or "").strip().casefold()
+    target_url = (ev.meeting_url or "").strip().casefold()
+    source_id = str(source_email_id or "").strip()
 
-        # Request only fields needed for duplicate matching
-        events_result = (
-            calendar_service.events()
-            .list(
-                calendarId=calendar_id,
-                timeMin=time_min,
-                timeMax=time_max,
-                maxResults=25,
-                singleEvents=True,
-                orderBy="startTime",
-                fields="items(id,summary,description,location,start,end,htmlLink,extendedProperties)",
-            )
-            .execute()
-        )
+    def event_start(existing_event: Dict[str, Any]) -> Optional[datetime]:
+        start_value = existing_event.get("start", {}) or {}
+        raw = start_value.get("dateTime") or start_value.get("date")
+        if not raw:
+            return None
+        try:
+            if len(raw) == 10 and "T" not in raw:
+                return datetime.fromisoformat(raw).replace(hour=9, minute=0, tzinfo=tz)
+            parsed = parser.isoparse(raw.replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=tz) if parsed.tzinfo is None else parsed.astimezone(tz)
+        except (TypeError, ValueError, OverflowError):
+            return None
 
-        items = events_result.get("items", [])
-        target_title = ev.title.strip().casefold()
-        target_url = (ev.meeting_url or "").strip().casefold()
+    def close_start(existing: Dict[str, Any]) -> bool:
+        candidate = event_start(existing)
+        if candidate is None:
+            return False
+        try:
+            return abs((candidate - start_dt).total_seconds()) <= 10 * 60
+        except (TypeError, ValueError, OverflowError):
+            return False
 
-        def event_start(existing_event: Dict[str, Any]) -> Optional[datetime]:
-            start_value = existing_event.get("start", {}) or {}
-            raw = start_value.get("dateTime") or start_value.get("date")
-            if not raw:
-                return None
-            try:
-                if len(raw) == 10 and "T" not in raw:
-                    return datetime.fromisoformat(raw).replace(hour=9, minute=0, tzinfo=tz)
-                parsed = parser.isoparse(raw.replace("Z", "+00:00"))
-                return parsed.replace(tzinfo=tz) if parsed.tzinfo is None else parsed.astimezone(tz)
-            except (TypeError, ValueError):
-                return None
+    items: List[Dict[str, Any]] = []
+    page_token: Optional[str] = None
+    try:
+        # Calendar may return a page token even for a narrow window. Continue through
+        # every page (bounded) so a busy calendar doesn't hide the matching occurrence.
+        for _ in range(5):
+            params: Dict[str, Any] = {
+                "calendarId": calendar_id,
+                "timeMin": time_min,
+                "timeMax": time_max,
+                "maxResults": 2500,
+                "singleEvents": True,
+                "orderBy": "startTime",
+                "fields": "nextPageToken,items(id,summary,description,location,start,end,htmlLink,extendedProperties)",
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            result = calendar_service.events().list(**params).execute()
+            items.extend(result.get("items", []) or [])
+            page_token = result.get("nextPageToken")
+            if not page_token:
+                break
+        if page_token and source_id:
+            # Do not create a potentially duplicate event if we couldn't finish the scan.
+            raise RuntimeError("Calendar duplicate scan exceeded its safe page limit.")
 
         for existing in items:
             existing_title = (existing.get("summary") or "").strip().casefold()
             existing_desc = (existing.get("description") or "").casefold()
             existing_loc = (existing.get("location") or "").casefold()
 
-            # A meeting URL is a strong identity signal; titles alone or substring
-            # matches cause false positives for recurring or similarly named meetings.
-            if target_url and (target_url in existing_desc or target_url in existing_loc):
+            # Meeting URLs are often reused for recurring events, so require the same
+            # occurrence time instead of treating the URL alone as globally unique.
+            if target_url and close_start(existing) and (
+                target_url in existing_desc or target_url in existing_loc
+            ):
                 return existing
 
-            priv = (existing.get("extendedProperties") or {}).get("private", {})
-            if priv.get("source") == "EmailAutomater":
-                signature = str(priv.get("ema_signature") or "").strip()
-                source_id = str(priv.get("source_email_id") or "").strip()
-                incoming_signature = str(getattr(ev, "signature", "") or "").strip()
-                incoming_source_id = str(getattr(ev, "source_email_id", "") or "").strip()
-                if (signature and incoming_signature and signature == incoming_signature) or (
-                    source_id and incoming_source_id and source_id == incoming_source_id
-                ):
-                    return existing
+            private_props = ((existing.get("extendedProperties") or {}).get("private") or {})
+            existing_source_id = str(private_props.get("source_email_id") or "").strip()
+            if (
+                source_id
+                and existing_source_id == source_id
+                and existing_title == target_title
+                and close_start(existing)
+            ):
+                return existing
 
-            # Fall back only to an exact title plus a very close start time.
-            if target_title and target_title == existing_title:
-                candidate_start = event_start(existing)
-                if candidate_start is not None:
-                    try:
-                        delta = abs((candidate_start - start_dt).total_seconds())
-                        if delta <= 10 * 60:
-                            return existing
-                    except (TypeError, ValueError, OverflowError):
-                        pass
+            # Legacy events did not store a source email ID; retain conservative
+            # exact-title/time matching for those.
+            if target_title and target_title == existing_title and close_start(existing):
+                return existing
 
         return None
-    except Exception as e:
-        logger.warning(f"Duplicate reconciliation skipped on {calendar_id}: {e}")
+    except Exception as exc:
+        logger.warning("Duplicate reconciliation failed on %s: %s", calendar_id, exc)
+        if source_id:
+            # Creating after a failed lookup can duplicate an event whose insert
+            # succeeded before a previous state-save failure. Fail closed on retries.
+            raise RuntimeError("Calendar duplicate verification is unavailable; event creation deferred.") from exc
         return None
 
 
@@ -248,6 +261,7 @@ def create_or_update_event(
     attachments: Optional[List[Dict[str, Any]]] = None,
     calendar_id: str = "primary",
     target_account_email: Optional[str] = None,
+    source_email_id: Optional[str] = None,
 ) -> CalendarResult:
     """
     Creates a calendar event strictly in the target account's calendar.
@@ -259,7 +273,9 @@ def create_or_update_event(
     resolved_calendar_id = (target_account_email or calendar_id).strip().lower()
 
     # 1. Skip creating duplicate if matching event exists
-    existing = find_duplicate_event(calendar_service, ev, resolved_calendar_id)
+    existing = find_duplicate_event(
+        calendar_service, ev, resolved_calendar_id, source_email_id=source_email_id
+    )
     if existing:
         logger.info(
             f"[{resolved_calendar_id}] Skipped duplicate event '{ev.title}' (ID: {existing.get('id')})."
@@ -368,6 +384,7 @@ def create_or_update_event(
                 "source": "EmailAutomater",
                 "scheduled_by": "SmartUniversalEmailAssistant",
                 "account_email": resolved_calendar_id,
+                **({"source_email_id": str(source_email_id).strip()} if source_email_id else {}),
             }
         },
         "reminders": {

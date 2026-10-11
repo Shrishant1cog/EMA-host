@@ -179,6 +179,27 @@ with tempfile.TemporaryDirectory() as temp_dir:
         google_auth.Credentials = old_credentials
         google_auth.clear_account_reauth('account-b@example.com')
 
+# Local state shadows must not collide when distinct emails normalize to the same filename.
+from backend.services import drive_state_adapter
+with tempfile.TemporaryDirectory() as temp_dir:
+    old_base_dir = drive_state_adapter.BASE_DIR
+    first_email = 'user.name@example.com'
+    second_email = 'user_name@example.com'
+    try:
+        drive_state_adapter.BASE_DIR = pathlib.Path(temp_dir)
+        assert drive_state_adapter._get_shadow_path(first_email) != drive_state_adapter._get_shadow_path(second_email)
+        legacy_path = drive_state_adapter._get_legacy_shadow_path(first_email)
+        legacy_path.write_text(json.dumps({
+            'settings': {'spam_threshold': '35'},
+            'email_actions': [{'email_id': 'one', 'account_email': first_email, 'status': 'PROCESSED'}],
+        }), encoding='utf-8')
+        migrated = drive_state_adapter._load_local_shadow(first_email)
+        assert migrated and migrated['settings']['spam_threshold'] == '35', 'Verified legacy shadow did not migrate'
+        assert drive_state_adapter._get_shadow_path(first_email).exists(), 'Collision-resistant shadow was not written'
+        assert drive_state_adapter._load_local_shadow(second_email) is None, 'Legacy shadow from a different email was loaded'
+    finally:
+        drive_state_adapter.BASE_DIR = old_base_dir
+
 # Per-session worker preferences survive process restarts and disappear on logout.
 with tempfile.TemporaryDirectory() as temp_dir:
     test_db = pathlib.Path(temp_dir) / 'worker-preferences.db'

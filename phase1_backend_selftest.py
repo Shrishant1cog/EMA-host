@@ -34,6 +34,21 @@ assert ai_service._trusted_meeting_provider('notzoom.us.attacker.example') is No
 assert ai_service._extract_meeting_url('Join at https://meet.google.com/abc-defg-hij') == 'https://meet.google.com/abc-defg-hij'
 assert ai_service._extract_meeting_url('Join at https://meet.google.com.attacker.example/abc') is None
 
+# Temporal evidence in the email body must be considered even when the subject is generic.
+body_date_only = ai_service._hard_gate(
+    {"category":"Meeting & Event","events":[{"title":"Project Call","start":"2026-10-01T10:00:00+05:30","end":"2026-10-01T11:00:00+05:30"}]},
+    "Meeting Invitation",
+    "organizer@example.com",
+    "",
+    "09:00",
+    0.5,
+    "2026-09-30T10:00:00+05:30",
+    False,
+    "Asia/Kolkata",
+    email_body="Please join the project call tomorrow at 10 AM.",
+)
+assert len(body_date_only["events"]) == 1, "A date/time in the email body was missed by the temporal gate"
+
 # Calendar invalid datetime must reject instead of inventing a future event.
 try:
     calendar_service._format_datetime_for_google('not-a-datetime','Asia/Kolkata')

@@ -18,7 +18,7 @@ import secrets
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 from contextlib import asynccontextmanager
 
@@ -69,6 +69,7 @@ from backend.utils.state_tracker import (
     is_user_session_valid,
     touch_user_session,
     revoke_user_session,
+    token_encryption_ready,
 )
 from backend.services.drive_state_adapter import (
     is_email_processed_drive,
@@ -299,6 +300,25 @@ def get_auth_flow(sid: str) -> Optional[Dict[str, Any]]:
         return dict(flow) if flow else None
 
 
+def claim_auth_flow(oauth_state: str) -> Optional[Dict[str, Any]]:
+    """Atomically claim one pending OAuth callback so concurrent replays cannot both run."""
+    key = str(oauth_state or "").strip()
+    if not key:
+        return None
+    now = time.time()
+    with _AUTH_LOCK:
+        flow = _AUTH_FLOWS.get(key)
+        if not flow or now - float(flow.get("timestamp", 0)) > 900:
+            _AUTH_FLOWS.pop(key, None)
+            return None
+        if flow.get("status") != "pending":
+            return None
+        flow["status"] = "processing"
+        flow["callback_claimed_at"] = now
+        flow["timestamp"] = now
+        return dict(flow)
+
+
 def consume_auth_bootstrap_flow(flow_id: str) -> Optional[Dict[str, Any]]:
     """Atomically consume a browser-visible OAuth bootstrap ID exactly once."""
     key = str(flow_id or "").strip()
@@ -469,23 +489,91 @@ async def request_diagnostics(request: Request, call_next):
 
 
 @app.get("/health")
+def _frontend_uses_custom_https_domain(frontend_url: str) -> bool:
+    parsed = urlparse(str(frontend_url or "").strip())
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme.lower() != "https" or not host or "." not in host:
+        return False
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        return False
+    # Hosting-provider subdomains are not custom domains. Production OAuth must
+    # return to the domain owned/configured for the site, not a provider URL.
+    provider_suffixes = (
+        ".netlify.app", ".onrender.com", ".vercel.app", ".pages.dev",
+        ".github.io", ".web.app", ".firebaseapp.com",
+    )
+    return not any(host.endswith(suffix) for suffix in provider_suffixes)
+
+
+def _persistent_storage_readiness() -> Dict[str, bool]:
+    render_runtime = os.getenv("RENDER", "").strip().lower() == "true"
+    db_path = Path(getattr(config, "DB_PATH", BASE_DIR / "assistant_v2.db")).expanduser().resolve()
+    mount_path = Path(os.getenv("EMA_RENDER_DISK_MOUNT_PATH", "/var/data")).expanduser().resolve()
+    under_mount = db_path == mount_path or mount_path in db_path.parents
+    mounted = mount_path.is_dir() and os.path.ismount(str(mount_path))
+    writable = db_path.parent.is_dir() and os.access(str(db_path.parent), os.W_OK)
+    database_exists = db_path.is_file()
+    ready = writable and database_exists and (not render_runtime or (under_mount and mounted))
+    return {
+        "required": render_runtime,
+        "mounted": mounted if render_runtime else True,
+        "database_on_persistent_disk": under_mount if render_runtime else True,
+        "database_exists": database_exists,
+        "writable": writable,
+        "ready": ready,
+    }
+
+
+@app.get("/health")
 def health_check():
     ram_mb = AdaptiveMemoryGovernor.get_memory_usage_mb()
-    return {
-        "status": "ok",
+    production_mode = (
+        os.getenv("RENDER", "").strip().lower() == "true"
+        or os.getenv("EMA_ENV", "").strip().lower() in {"production", "prod"}
+    )
+    storage = _persistent_storage_readiness()
+    custom_domain_required = os.getenv(
+        "EMA_REQUIRE_CUSTOM_DOMAIN", "true" if production_mode else "false"
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    custom_domain_configured = _frontend_uses_custom_https_domain(
+        getattr(config, "FRONTEND_URL", "")
+    )
+    google_oauth_configured = bool(
+        getattr(config, "GOOGLE_CLIENT_ID", "").strip()
+        and getattr(config, "GOOGLE_CLIENT_SECRET", "").strip()
+    )
+    encryption_configured = token_encryption_ready()
+    ai_configured = bool(getattr(config, "GROQ_API_KEYS", []))
+    checks = {
+        "persistent_storage": storage["ready"],
+        "frontend_custom_domain": (not custom_domain_required) or custom_domain_configured,
+        "google_oauth": google_oauth_configured or not production_mode,
+        "credential_encryption": encryption_configured,
+        "ai_provider": ai_configured or not production_mode,
+        "secure_session_cookie": bool(getattr(config, "SESSION_SECURE_COOKIE", False)) or not production_mode,
+    }
+    ready = all(checks.values())
+    payload = {
+        "status": "ok" if ready else "degraded",
+        "ready": ready,
+        "checks": checks,
+        "storage": storage,
+        "custom_domain_required": custom_domain_required,
+        "custom_domain_configured": custom_domain_configured,
         "timestamp": int(time.time()),
         "memory_mb": ram_mb,
         "is_lean": 0 <= ram_mb < 500.0,
         "memory_supported": ram_mb >= 0,
         "error_ledger": ERROR_LEDGER_FILE.exists(),
-        "api_version": "2026-09",
+        "api_version": "2026-10",
         "memory_backend": "psutil-or-windows-psapi-or-linux-proc",
-        "credential_encryption": "enabled" if (getattr(config, "TOKEN_ENCRYPTION_KEY", "") or not getattr(config, "TOKEN_ENCRYPTION_REQUIRED", False)) else "missing",
+        "credential_encryption": "enabled" if encryption_configured else "missing_or_invalid",
         "session_cookie_secure": bool(getattr(config, "SESSION_SECURE_COOKIE", False)),
-        "ai_configured": bool(getattr(config, "GROQ_API_KEYS", [])),
+        "ai_configured": ai_configured,
         "ai_primary_model": getattr(config, "GROQ_MODEL", ""),
         "ai_verifier_enabled": bool(getattr(config, "AI_VERIFIER_ENABLED", True)),
     }
+    return JSONResponse(payload, status_code=200 if ready else 503)
 
 
 def _session_cookie_secure() -> bool:
@@ -2311,15 +2399,13 @@ def auth_login(
 @app.get("/api/auth/callback")
 def auth_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     oauth_state = str(state or "").strip()
-    flow_record = get_auth_flow(oauth_state) if oauth_state else None
+    flow_record = claim_auth_flow(oauth_state)
     session_id = str((flow_record or {}).get("session_id") or "").strip()
     completion_flow_id = str((flow_record or {}).get("completion_flow_id") or "").strip()
 
     if not session_id or not flow_record:
-        return HTMLResponse("Authentication session expired. Please start sign-in again.", status_code=400)
-    if flow_record.get("status") != "pending":
         return HTMLResponse(
-            "This Google sign-in callback has already been used. Please start sign-in again if needed.",
+            "This Google sign-in callback expired or was already used. Please start sign-in again.",
             status_code=400,
             headers={"Cache-Control": "no-store, max-age=0"},
         )
@@ -2342,7 +2428,7 @@ def auth_callback(request: Request, code: Optional[str] = None, state: Optional[
         redirect_uri = flow_record.get("redirect_uri") if flow_record else get_dynamic_redirect_uri(request)
         code_verifier = flow_record.get("code_verifier") if flow_record else None
 
-        flow = build_oauth_flow(request=request, state=session_id, redirect_uri=redirect_uri)
+        flow = build_oauth_flow(request=request, state=oauth_state, redirect_uri=redirect_uri)
         if code_verifier:
             flow.code_verifier = code_verifier
         flow.fetch_token(code=code, code_verifier=code_verifier or None)
